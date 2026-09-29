@@ -1,0 +1,5 @@
+user_id,age,city,is_active
+U101,25.0,New York,True
+U102,,London,False
+U103,42.0,,True
+U104,37.0,Tokyo,True

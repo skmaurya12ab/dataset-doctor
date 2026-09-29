@@ -6,6 +6,16 @@ from app.services.ai_provider import (
     LLMResponseResult,
     LLMUsage,
 )
+from app.services.file_storage import FileStorageService
+from app.services.ingestion import (
+    BaseLoader,
+    CSVLoader,
+    DatasetIngestionService,
+    JSONLoader,
+    LoadedDataset,
+    ParquetLoader,
+    XLSXLoader,
+)
 from app.services.job_runner import (
     AnalysisJobRunner,
     JobInfo,
@@ -22,4 +32,12 @@ __all__ = [
     "JobInfo",
     "JobStatus",
     "ThreadPoolJobRunner",
+    "FileStorageService",
+    "DatasetIngestionService",
+    "BaseLoader",
+    "CSVLoader",
+    "XLSXLoader",
+    "JSONLoader",
+    "ParquetLoader",
+    "LoadedDataset",
 ]

@@ -4,18 +4,21 @@ Focuses strictly on:
 - Lifecycle management (startup/shutdown)
 - Middleware & routing registration
 - Global health probe
+- Global domain exception handling
 - Clean separation from business and analytical logic
 """
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.deps import shutdown_job_runner
 from app.api.v1.router import v1_router
 from app.core.config import get_settings
 from app.core.database import close_database
+from app.core.exceptions import DatasetDoctorException
 from app.core.logging import configure_logging, get_logger
 from app.schemas.health import HealthResponse
 
@@ -68,6 +71,15 @@ def create_application() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Domain exception handler
+    @application.exception_handler(DatasetDoctorException)
+    async def domain_exception_handler(request: Request, exc: DatasetDoctorException) -> JSONResponse:
+        logger.warning("Domain exception caught on %s: %s (status %d)", request.url.path, exc.message, exc.status_code)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": exc.message},
+        )
 
     # Root health probe
     @application.get("/health", response_model=HealthResponse, tags=["System"])
