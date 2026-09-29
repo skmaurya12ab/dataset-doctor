@@ -1,0 +1,68 @@
+services:
+  # ----------------------------------------------------------------------------
+  # PostgreSQL 16 Database Service
+  # ----------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: dataset_doctor_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: ${POSTGRES_DB:-dataset_doctor}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-dataset_doctor}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - dataset_doctor_net
+
+  # ----------------------------------------------------------------------------
+  # FastAPI Application Service
+  # ----------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dataset_doctor_api
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_NAME: "Dataset Doctor"
+      ENVIRONMENT: "development"
+      DEBUG: "true"
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-dataset_doctor}"
+      UPLOAD_DIR: "uploads"
+      MAX_UPLOAD_SIZE_BYTES: "104857600"
+      LOG_LEVEL: "INFO"
+      MAX_WORKER_THREADS: "4"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      OPENAI_MODEL: "${OPENAI_MODEL:-gpt-4o-2024-08-06}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - uploads_data:/app/uploads
+    networks:
+      - dataset_doctor_net
+
+# ------------------------------------------------------------------------------
+# Persistent Volumes & Networks
+# ------------------------------------------------------------------------------
+volumes:
+  pg_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  dataset_doctor_net:
+    driver: bridge
