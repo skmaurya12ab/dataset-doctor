@@ -1,0 +1,6 @@
+id,name,status,mixed_col,constant_col
+1,Alice,active,100,FIXED
+2,Bob,,text_val,FIXED
+3,Charlie,"   ",300,FIXED
+1,Alice,active,100,FIXED
+5,Evan,active,500,FIXED

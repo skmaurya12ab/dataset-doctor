@@ -44,10 +44,12 @@ uploads/*
 storage/*
 !storage/.gitkeep
 
-# Database data
+# Database data & logs
 pgdata/
 *.sqlite3
 *.db
+*.log
+
 
 # IDE & OS
 .vscode/

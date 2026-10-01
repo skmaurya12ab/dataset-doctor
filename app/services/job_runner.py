@@ -178,3 +178,15 @@ class ThreadPoolJobRunner(AnalysisJobRunner):
     async def shutdown(self, wait: bool = True) -> None:
         logger.info("Shutting down ThreadPoolJobRunner executor...")
         self._executor.shutdown(wait=wait, cancel_futures=True)
+
+
+_global_job_runner: Optional[AnalysisJobRunner] = None
+
+
+def get_job_runner() -> AnalysisJobRunner:
+    """Retrieve or initialize the global background AnalysisJobRunner instance."""
+    global _global_job_runner
+    if _global_job_runner is None:
+        _global_job_runner = ThreadPoolJobRunner(max_workers=4)
+    return _global_job_runner
+

@@ -50,3 +50,11 @@ class StorageException(DatasetDoctorException):
 
     def __init__(self, details: str):
         super().__init__(f"Storage I/O failure: {details}", status_code=500)
+
+
+class ValidationException(DatasetDoctorException):
+    """Raised when input parameters fail semantic or domain validation."""
+
+    def __init__(self, details: str):
+        super().__init__(f"Validation error: {details}", status_code=422)
+

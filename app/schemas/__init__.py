@@ -1,5 +1,12 @@
 """Pydantic schemas package exports."""
 
+from app.schemas.analysis import (
+    AnalysisRequest,
+    AnalysisResponse,
+    AnalysisRunRead,
+    QualityIssueListResponse,
+    QualityIssueRead,
+)
 from app.schemas.dataset import (
     ColumnSchemaItem,
     DatasetListItem,
@@ -20,4 +27,10 @@ __all__ = [
     "DatasetUploadResponse",
     "DatasetVersionRead",
     "RawSchema",
+    "AnalysisRequest",
+    "AnalysisResponse",
+    "AnalysisRunRead",
+    "QualityIssueRead",
+    "QualityIssueListResponse",
 ]
+

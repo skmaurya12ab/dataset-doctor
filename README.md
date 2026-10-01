@@ -2,13 +2,43 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 1 complete — Ingestion, Parquet normalization, immutable versioning, and preview API operational.`
+> **Status:** `Phase 2 complete — Core deterministic analysis engine operational across 5 profiling modules with PostgreSQL persistence, provenance tracking, and REST API.`
 
 ---
 
 ## Core Architectural Principle
 
 **Python calculates factual statistics and findings. The LLM interprets those structured findings. The LLM is never responsible for calculating raw statistics.**
+
+---
+
+## Supported Analysis Capabilities (Phase 2)
+
+The deterministic analysis pipeline profiles datasets across five dedicated modules:
+
+1. **Schema Analyzer (`schema_analyzer`, v1.0.0)**:
+   - Detects duplicate column names (`HIGH` severity)
+   - Detects blank or whitespace-only column headers (`MEDIUM` severity)
+   - Protects valid unicode, spaces, and international symbols
+2. **Data Type Analyzer (`dtype_analyzer`, v1.0.0)**:
+   - Conceptual taxonomy normalization (`numeric`, `boolean`, `datetime`, `timedelta`, `categorical`, `string`, `object`)
+   - Identifies mixed scalar types in single columns (`HIGH` severity)
+   - Detects unsupported nested data structures (`dict`, `list`, `set`) (`HIGH` severity)
+   - Flags numeric-like strings ($\ge 95\%$ parseable) (`LOW` severity)
+   - Flags datetime-like strings ($\ge 95\%$ parseable) (`LOW` severity)
+3. **Missing Value Analyzer (`missing_analyzer`, v1.0.0)**:
+   - Identifies standard missing values and blank strings (`""`, `"   "`)
+   - Preserves valid categorical tokens (e.g. `"NA"`) unless configured
+   - Granular thresholds: $>0\text{--}5\%$ (`LOW`), $>5\text{--}20\%$ (`MEDIUM`), $>20\text{--}40\%$ (`HIGH`), $>40\%$ (`CRITICAL`)
+4. **Duplicate Analyzer (`duplicate_analyzer`, v1.0.0)**:
+   - Identifies exact identical rows accounting for all duplicate cluster members
+   - Thresholds: $>0\text{--}1\%$ (`LOW`), $>1\text{--}5\%$ (`MEDIUM`), $>5\text{--}20\%$ (`HIGH`), $>20\%$ (`CRITICAL`)
+5. **Cardinality Analyzer (`cardinality_analyzer`, v1.0.0)**:
+   - Detects constant zero-variance features (`MEDIUM` severity)
+   - Detects near-constant features ($\text{unique ratio} \le 1\%$) (`LOW` severity)
+   - Flags high-cardinality categorical features ($\ge 50$ distinct categories) (`LOW` severity)
+   - Identifies entity-like high-cardinality columns ($\ge 95\%$ uniqueness + ID keywords) (`INFO` advisory)
+
 
 ---
 

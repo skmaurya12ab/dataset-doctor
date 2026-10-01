@@ -42,6 +42,14 @@ def get_ingestion_service() -> DatasetIngestionService:
     return _ingestion_service
 
 
+def get_analysis_service(
+    job_runner: Annotated[AnalysisJobRunner, Depends(get_job_runner)],
+) -> "AnalysisService":
+    """Dependency provider for deterministic analysis orchestration."""
+    from app.services.analysis_service import AnalysisService
+    return AnalysisService(job_runner=job_runner)
+
+
 async def shutdown_job_runner() -> None:
     """Shutdown job runner on application stop."""
     global _job_runner
@@ -56,3 +64,5 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 JobRunnerDep = Annotated[AnalysisJobRunner, Depends(get_job_runner)]
 StorageServiceDep = Annotated[FileStorageService, Depends(get_storage_service)]
 IngestionServiceDep = Annotated[DatasetIngestionService, Depends(get_ingestion_service)]
+AnalysisServiceDep = Annotated["AnalysisService", Depends(get_analysis_service)]
+

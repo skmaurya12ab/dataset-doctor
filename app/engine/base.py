@@ -70,6 +70,7 @@ class AnalysisContext:
     dataset_version_id: str
     file_path: Optional[Path] = None
     df: Optional[Any] = None  # DataFrame instance (pandas/polars/pyarrow)
+    file_format: str = "parquet"
     target_column: Optional[str] = None
     problem_type: Optional[str] = None  # 'classification', 'regression', 'unsupervised'
     sample_size: int = 50_000
