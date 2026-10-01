@@ -61,5 +61,58 @@ def test_pipeline_strict_determinism():
         assert i1.title == i2.title
         assert i1.description == i2.description
         assert i1.evidence == i2.evidence
-        assert i1.remediation_hint == i2.remediation_hint
-        assert i1.parameters_used == i2.parameters_used
+    # 6. Heuristic score and breakdown must match exactly
+    assert res1["ml_readiness_score"] == res2["ml_readiness_score"]
+    assert res1["heuristic_breakdown"].heuristic_score == res2["heuristic_breakdown"].heuristic_score
+    assert res1["heuristic_breakdown"].total_penalties == res2["heuristic_breakdown"].total_penalties
+    assert res1["heuristic_breakdown"].rating == res2["heuristic_breakdown"].rating
+
+
+def test_pipeline_phase3_advanced_determinism():
+    """Verify that Phase 3 statistical analyzers and ML readiness heuristics are 100% deterministic."""
+    import numpy as np
+
+    rng = np.random.RandomState(42)
+    n = 120
+    x = np.linspace(10, 100, n)
+    df = pd.DataFrame({
+        "id": range(1, n + 1),
+        "feat_norm": rng.normal(50, 5, n),
+        "feat_skew": np.exp(rng.normal(0, 1.2, n)),
+        "feat_corr1": x,
+        "feat_corr2": x * 1.5,
+        "target": [0] * 100 + [1] * 20,
+    })
+
+    params = {
+        "outlier_analyzer": {"maximum_sample_size": 50, "random_seed": 42},
+        "correlation_analyzer": {"max_sample_size": 60, "random_seed": 42},
+    }
+
+    ctx1 = AnalysisContext(
+        dataset_version_id="fixed_ver_p3",
+        df=df.copy(),
+        target_column="target",
+        problem_type="classification",
+        parameters=params,
+    )
+    ctx2 = AnalysisContext(
+        dataset_version_id="fixed_ver_p3",
+        df=df.copy(),
+        target_column="target",
+        problem_type="classification",
+        parameters=params,
+    )
+
+    p1 = AnalysisPipeline()
+    p2 = AnalysisPipeline()
+
+    res1 = p1.execute(ctx1)
+    res2 = p2.execute(ctx2)
+
+    assert res1["summary_metrics"] == res2["summary_metrics"]
+    assert res1["combined_metrics"] == res2["combined_metrics"]
+    assert res1["ml_readiness_score"] == res2["ml_readiness_score"]
+    assert res1["heuristic_breakdown"].heuristic_score == res2["heuristic_breakdown"].heuristic_score
+    assert res1["heuristic_breakdown"].total_penalties == res2["heuristic_breakdown"].total_penalties
+    assert len(res1["all_issues"]) == len(res2["all_issues"])

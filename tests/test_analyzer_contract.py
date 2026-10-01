@@ -87,8 +87,9 @@ def test_ml_readiness_heuristic_scorer_transparency() -> None:
     assert breakdown.base_score == 100.0
     assert breakdown.total_penalties == 10.0
     assert breakdown.heuristic_score == 90.0
-    assert breakdown.rating == "Production Ready"
+    assert breakdown.rating == "Production-oriented readiness"
     assert len(breakdown.itemized_penalties) == 1
+
 
     penalty = breakdown.itemized_penalties[0]
     assert penalty.module == "mock_null_analyzer"

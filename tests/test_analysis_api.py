@@ -190,3 +190,66 @@ async def test_get_analysis_nonexistent_run_404(async_client: AsyncClient):
 
     issues_resp = await async_client.get(f"/api/v1/analyses/{fake_run_id}/issues")
     assert issues_resp.status_code == 404
+
+    heur_resp = await async_client.get(f"/api/v1/analyses/{fake_run_id}/heuristic")
+    assert heur_resp.status_code == 404
+
+
+async def test_get_analysis_heuristic_endpoint(
+    async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    seeded_dataset_version: tuple[uuid.UUID, uuid.UUID],
+):
+    """Test GET /api/v1/analyses/{run_id}/heuristic returns complete transparent breakdown."""
+    _, version_id = seeded_dataset_version
+
+    heuristic_data = {
+        "heuristic_score": 75.0,
+        "rating": "Minor remediation",
+        "base_score": 100.0,
+        "total_penalties": 25.0,
+        "disclaimer": "This score is a deterministic heuristic reflecting structural, statistical, and modeling data hygiene. It does not guarantee downstream model performance.",
+        "itemized_penalties": [
+            {
+                "module": "missing_analyzer",
+                "severity": "CRITICAL",
+                "reason": "Missing values detected: Column all missing",
+                "penalty": 25.0,
+                "column_name": "feature_1",
+            }
+        ],
+    }
+
+    run = AnalysisRun(
+        dataset_version_id=version_id,
+        status=AnalysisStatus.COMPLETED.value,
+        engine_version="1.0.0",
+        total_issues_count=1,
+        critical_issues_count=1,
+        summary_metrics={"row_count": 4, "ml_readiness_score": 75.0},
+        analyzer_versions={"missing_analyzer": "1.0.0"},
+        ml_readiness_score=75.0,
+        heuristic_breakdown=heuristic_data,
+    )
+    test_db_session.add(run)
+    await test_db_session.commit()
+    await test_db_session.refresh(run)
+
+    # 1. Query /analyses/{run_id} to ensure ml_readiness_score and heuristic_breakdown are returned
+    run_resp = await async_client.get(f"/api/v1/analyses/{run.id}")
+    assert run_resp.status_code == 200
+    run_dict = run_resp.json()
+    assert run_dict["ml_readiness_score"] == 75.0
+    assert run_dict["heuristic_breakdown"]["rating"] == "Minor remediation"
+
+    # 2. Query /analyses/{run_id}/heuristic
+    resp = await async_client.get(f"/api/v1/analyses/{run.id}/heuristic")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["heuristic_score"] == 75.0
+    assert data["rating"] == "Minor remediation"
+    assert data["base_score"] == 100.0
+    assert data["total_penalties"] == 25.0
+    assert len(data["itemized_penalties"]) == 1
+    assert data["itemized_penalties"][0]["penalty"] == 25.0
+    assert data["itemized_penalties"][0]["module"] == "missing_analyzer"

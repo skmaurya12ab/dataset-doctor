@@ -2,7 +2,14 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 2 complete — Core deterministic analysis engine operational across 5 profiling modules with PostgreSQL persistence, provenance tracking, and REST API.`
+> **Status:** `Phase 3 complete — Advanced statistical & ML analysis engine operational across 10 deterministic profiling modules with ML Readiness Heuristic, PostgreSQL persistence, provenance tracking, and REST API.`
+
+### Project Roadmap Status
+- **Phase 0 — Foundations & Core Abstractions**: ✅
+- **Phase 1 — Ingestion & Immutable Dataset Versioning**: ✅
+- **Phase 2 — Core Deterministic Analysis**: ✅
+- **Phase 3 — Advanced Statistical & ML Analysis**: ✅
+- **Phase 4 — AI Remediation & Action Planning**: 🚧 Next
 
 ---
 
@@ -12,32 +19,49 @@ Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed
 
 ---
 
-## Supported Analysis Capabilities (Phase 2)
+## Current Supported Capabilities
 
-The deterministic analysis pipeline profiles datasets across five dedicated modules:
+The deterministic analysis pipeline profiles datasets across ten dedicated modules followed by the explainable heuristic:
 
-1. **Schema Analyzer (`schema_analyzer`, v1.0.0)**:
-   - Detects duplicate column names (`HIGH` severity)
-   - Detects blank or whitespace-only column headers (`MEDIUM` severity)
-   - Protects valid unicode, spaces, and international symbols
-2. **Data Type Analyzer (`dtype_analyzer`, v1.0.0)**:
-   - Conceptual taxonomy normalization (`numeric`, `boolean`, `datetime`, `timedelta`, `categorical`, `string`, `object`)
-   - Identifies mixed scalar types in single columns (`HIGH` severity)
-   - Detects unsupported nested data structures (`dict`, `list`, `set`) (`HIGH` severity)
-   - Flags numeric-like strings ($\ge 95\%$ parseable) (`LOW` severity)
-   - Flags datetime-like strings ($\ge 95\%$ parseable) (`LOW` severity)
-3. **Missing Value Analyzer (`missing_analyzer`, v1.0.0)**:
-   - Identifies standard missing values and blank strings (`""`, `"   "`)
-   - Preserves valid categorical tokens (e.g. `"NA"`) unless configured
-   - Granular thresholds: $>0\text{--}5\%$ (`LOW`), $>5\text{--}20\%$ (`MEDIUM`), $>20\text{--}40\%$ (`HIGH`), $>40\%$ (`CRITICAL`)
-4. **Duplicate Analyzer (`duplicate_analyzer`, v1.0.0)**:
-   - Identifies exact identical rows accounting for all duplicate cluster members
-   - Thresholds: $>0\text{--}1\%$ (`LOW`), $>1\text{--}5\%$ (`MEDIUM`), $>5\text{--}20\%$ (`HIGH`), $>20\%$ (`CRITICAL`)
-5. **Cardinality Analyzer (`cardinality_analyzer`, v1.0.0)**:
-   - Detects constant zero-variance features (`MEDIUM` severity)
-   - Detects near-constant features ($\text{unique ratio} \le 1\%$) (`LOW` severity)
-   - Flags high-cardinality categorical features ($\ge 50$ distinct categories) (`LOW` severity)
-   - Identifies entity-like high-cardinality columns ($\ge 95\%$ uniqueness + ID keywords) (`INFO` advisory)
+### Phase 2 Core Quality Analyzers
+1. **Schema Analyzer (`schema_analyzer`, v1.0.0)**: Duplicate column headers, blank headers, unicode preservation.
+2. **Data Type Analyzer (`dtype_analyzer`, v1.0.0)**: Conceptual taxonomy mapping, mixed scalar types, nested structures, parseable strings.
+3. **Missing Value Analyzer (`missing_analyzer`, v1.0.0)**: Null value rates, blank string classification, tiered severity ($>0-5\%$ LOW, $>5-20\%$ MEDIUM, $>20-40\%$ HIGH, $>40\%$ CRITICAL).
+4. **Duplicate Analyzer (`duplicate_analyzer`, v1.0.0)**: Exact record duplication rates with complete cluster member accounting.
+5. **Cardinality Analyzer (`cardinality_analyzer`, v1.0.0)**: Constant features, near-constant variance, high-cardinality categoricals, identifier detection.
+
+### Phase 3 Advanced Statistical & ML Analyzers
+6. **Outlier Analyzer (`outlier_analyzer`, v1.0.0)**:
+   - Method A: Interquartile Range (IQR) with zero-IQR suppression.
+   - Method B: Median Absolute Deviation (MAD) with robust modified Z-score thresholds.
+   - Method C: Multivariate Isolation Forest with deterministic sampling.
+   - Tiered severity based on percentage of affected rows.
+7. **Distribution Analyzer (`distribution_analyzer`, v1.0.0)**:
+   - Summary statistics (mean, median, std, min, max, quartiles).
+   - Fisher-Pearson skewness severity ($1-2$ LOW, $2-3$ MEDIUM, $\ge 3$ HIGH).
+   - Fisher excess kurtosis calculation.
+   - SciPy D'Agostino's $K^2$ omnibus normality test (`dagostino_k_squared`).
+8. **Correlation Analyzer (`correlation_analyzer`, v1.0.0)**:
+   - Pairwise Pearson and Spearman correlation across non-constant numeric features.
+   - Unique upper-triangle pairs only (no duplicate permutations, no self-correlations).
+   - Multicollinearity thresholds ($0.90-0.95$ LOW, $0.95-0.99$ MEDIUM, $\ge 0.99$ HIGH).
+   - Separate target correlation profiling.
+   - Computational safeguards (`MAX_CORRELATION_FEATURES`, row sampling).
+9. **Class Imbalance Analyzer (`imbalance_analyzer`, v1.0.0)**:
+   - Evaluates target label distribution for classification tasks.
+   - Binary imbalance ratios and severity ($>60\%$ LOW, $>75\%$ MEDIUM, $>90\%$ HIGH, $>95\%$ CRITICAL).
+   - Multiclass concentration analysis.
+   - Advisory detection for tiny classes ($< 10$ samples).
+10. **Data Leakage Analyzer (`leakage_analyzer`, v1.0.0)**:
+    - Signal A: Target identity and near-identity ($\ge 0.99$ match ratio).
+    - Signal B: Extreme Pearson correlation with target ($\ge 0.99$).
+    - Signal C: Categorical conditional purity ($\ge 0.99$).
+    - Signal D: Suspicious naming scan (strictly advisory INFO, never elevated based on name alone).
+11. **ML Readiness Heuristic Scorer (`scoring.py`, v1.0.0)**:
+    - Transparent deduction system (CRITICAL: 25, HIGH: 10, MEDIUM: 4, LOW: 1, INFO: 0).
+    - Single-column penalty deduplication cap (max 25.0 points per column).
+    - Descriptive rating tiers: Production-oriented readiness, Minor remediation, Significant preprocessing, High risk / substantial remediation.
+    - Full itemized penalty breakdown API with provenance disclaimer.
 
 
 ---

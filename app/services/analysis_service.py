@@ -12,6 +12,7 @@ from sqlalchemy.pool import NullPool
 
 from app.core.config import get_settings
 from app.core.exceptions import EntityNotFoundException, ValidationException
+from app.core.json_utils import to_json_safe
 from app.core.logging import get_logger
 from app.engine.base import AnalysisContext
 from app.engine.pipeline import AnalysisPipeline
@@ -22,6 +23,7 @@ from app.services.file_storage import FileStorageService
 from app.services.job_runner import AnalysisJobRunner, get_job_runner
 
 logger = get_logger(__name__)
+
 
 
 async def _execute_analysis_coro(
@@ -125,7 +127,26 @@ async def _execute_analysis_coro(
             if issues_to_create:
                 active_session.add_all(issues_to_create)
 
-            # 7. Update AnalysisRun to COMPLETED
+            # 7. Update AnalysisRun to COMPLETED with Phase 3 ML Readiness Heuristic
+            heuristic_obj = pipeline_result["heuristic_breakdown"]
+            heuristic_dict = {
+                "heuristic_score": heuristic_obj.heuristic_score,
+                "rating": heuristic_obj.rating,
+                "base_score": heuristic_obj.base_score,
+                "total_penalties": heuristic_obj.total_penalties,
+                "disclaimer": heuristic_obj.disclaimer,
+                "itemized_penalties": [
+                    {
+                        "module": p.module,
+                        "severity": p.severity.value,
+                        "reason": p.reason,
+                        "penalty": p.penalty,
+                        "column_name": p.column_name,
+                    }
+                    for p in heuristic_obj.itemized_penalties
+                ],
+            }
+
             run.status = AnalysisStatus.COMPLETED.value
             run.engine_version = "1.0.0"
             run.analyzer_versions = pipeline_result["analyzer_versions"]
@@ -133,9 +154,12 @@ async def _execute_analysis_coro(
             run.critical_issues_count = pipeline_result["critical_issues_count"]
             run.execution_time_ms = pipeline_result["total_execution_time_ms"]
             run.summary_metrics = pipeline_result["summary_metrics"]
+            run.ml_readiness_score = heuristic_obj.heuristic_score
+            run.heuristic_breakdown = to_json_safe(heuristic_dict)
             run.completed_at = datetime.now(timezone.utc)
 
             await active_session.commit()
+
             logger.info("Analysis run %s completed successfully with %d issues", run_id, len(issues_to_create))
 
     except Exception as exc:

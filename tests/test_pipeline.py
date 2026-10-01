@@ -7,7 +7,7 @@ from app.engine.base import AnalysisContext
 from app.engine.pipeline import AnalysisPipeline, get_default_analyzers
 
 
-def test_pipeline_executes_all_five_analyzers_in_order():
+def test_pipeline_executes_all_ten_analyzers_in_order():
     pipeline = AnalysisPipeline()
     expected_order = [
         "schema_analyzer",
@@ -15,6 +15,11 @@ def test_pipeline_executes_all_five_analyzers_in_order():
         "missing_analyzer",
         "duplicate_analyzer",
         "cardinality_analyzer",
+        "outlier_analyzer",
+        "distribution_analyzer",
+        "correlation_analyzer",
+        "imbalance_analyzer",
+        "leakage_analyzer",
     ]
     actual_order = [a.name for a in pipeline.analyzers]
     assert actual_order == expected_order
@@ -28,12 +33,12 @@ def test_pipeline_executes_all_five_analyzers_in_order():
     output = pipeline.execute(ctx)
 
     assert "module_results" in output
-    assert len(output["module_results"]) == 5
+    assert len(output["module_results"]) == 10
     result_names = [m.module_name for m in output["module_results"]]
     assert result_names == expected_order
 
     # Verify all analyzer versions present
-    assert len(output["analyzer_versions"]) == 5
+    assert len(output["analyzer_versions"]) == 10
     for mod_name in expected_order:
         assert output["analyzer_versions"][mod_name] == "1.0.0"
 

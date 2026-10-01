@@ -1,9 +1,9 @@
-"""Pydantic schemas package exports."""
-
 from app.schemas.analysis import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisRunRead,
+    HeuristicBreakdownRead,
+    ItemizedPenaltyRead,
     QualityIssueListResponse,
     QualityIssueRead,
 )
@@ -32,5 +32,8 @@ __all__ = [
     "AnalysisRunRead",
     "QualityIssueRead",
     "QualityIssueListResponse",
+    "HeuristicBreakdownRead",
+    "ItemizedPenaltyRead",
 ]
+
 

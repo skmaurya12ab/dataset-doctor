@@ -10,6 +10,7 @@ from app.schemas.analysis import (
     AnalysisRequest,
     AnalysisResponse,
     AnalysisRunRead,
+    HeuristicBreakdownRead,
     QualityIssueListResponse,
     QualityIssueRead,
 )
@@ -59,6 +60,26 @@ async def get_analysis_status_endpoint(
     if not run:
         raise EntityNotFoundException("AnalysisRun", str(run_id))
     return AnalysisRunRead.model_validate(run)
+
+
+@router.get(
+    "/analyses/{run_id}/heuristic",
+    response_model=HeuristicBreakdownRead,
+    status_code=status.HTTP_200_OK,
+    summary="Get transparent ML Readiness Heuristic breakdown",
+    description="Retrieve the complete explainable itemized penalty breakdown and rating for an analysis run.",
+)
+async def get_analysis_heuristic_endpoint(
+    run_id: uuid.UUID,
+    db: DBSessionDep,
+    analysis_service: AnalysisServiceDep,
+) -> HeuristicBreakdownRead:
+    run = await analysis_service.get_analysis(db=db, run_id=run_id)
+    if not run:
+        raise EntityNotFoundException("AnalysisRun", str(run_id))
+    if not run.heuristic_breakdown:
+        raise EntityNotFoundException("HeuristicBreakdown", f"No heuristic breakdown available for analysis run {run_id}")
+    return HeuristicBreakdownRead.model_validate(run.heuristic_breakdown)
 
 
 @router.get(

@@ -81,3 +81,25 @@ class QualityIssueListResponse(BaseModel):
     limit: int
     offset: int
     items: List[QualityIssueRead]
+
+
+class ItemizedPenaltyRead(BaseModel):
+    """Itemized penalty deduction in the ML Readiness Heuristic breakdown."""
+
+    module: str
+    severity: str
+    reason: str
+    penalty: float
+    column_name: Optional[str] = None
+
+
+class HeuristicBreakdownRead(BaseModel):
+    """Transparent explainable breakdown of the ML Readiness Heuristic."""
+
+    heuristic_score: float
+    rating: str
+    base_score: float = 100.0
+    total_penalties: float = 0.0
+    disclaimer: str
+    itemized_penalties: List[ItemizedPenaltyRead] = Field(default_factory=list)
+
