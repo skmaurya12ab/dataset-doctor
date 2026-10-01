@@ -151,7 +151,12 @@ class CorrelationAnalyzer(BaseAnalyzer):
                 if abs_r >= threshold:
                     high_corr_pairs.append(pair_entry)
 
-                    severity = self._determine_severity(abs_r)
+                    severity = self._determine_severity(
+                        abs_r,
+                        low_thresh=threshold,
+                        med_thresh=med_thresh,
+                        high_thresh=high_thresh,
+                    )
                     if severity is not None:
                         issues.append(
                             QualityIssueData(
@@ -233,12 +238,25 @@ class CorrelationAnalyzer(BaseAnalyzer):
             issues=issues,
         )
 
-    def _determine_severity(self, abs_r: float) -> Optional[Severity]:
-        """Determine heuristic severity for an absolute correlation value."""
-        if abs_r >= 0.99:
+    def _determine_severity(
+        self,
+        abs_r: float,
+        low_thresh: float = 0.90,
+        med_thresh: float = 0.95,
+        high_thresh: float = 0.99,
+    ) -> Optional[Severity]:
+        """Determine heuristic severity for an absolute correlation value.
+
+        Policy:
+        abs(r) < 0.90         → no correlation issue (None)
+        0.90 <= abs(r) < 0.95 → LOW
+        0.95 <= abs(r) < 0.99 → MEDIUM
+        abs(r) >= 0.99        → HIGH
+        """
+        if abs_r >= high_thresh:
             return Severity.HIGH
-        elif abs_r >= 0.95:
+        elif abs_r >= med_thresh:
             return Severity.MEDIUM
-        elif abs_r >= 0.90:
+        elif abs_r >= low_thresh:
             return Severity.LOW
         return None

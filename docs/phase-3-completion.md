@@ -35,18 +35,36 @@ Dataset Doctor has completed **Phase 3: Advanced Statistical & ML Analysis**. Th
    - Signal B: Extreme Pearson correlation ($\ge 0.99 \rightarrow$ `HIGH`).
    - Signal C: Categorical conditional purity ($\ge 0.99 \rightarrow$ `HIGH`).
    - Signal D: Suspicious naming check strictly produces `INFO` contextual findings, never `HIGH` or `CRITICAL`.
-6. **Module 11: ML Readiness Heuristic Scorer (`app/engine/scoring.py`)**
+6. **ML Readiness Heuristic Scorer (`app/engine/scoring.py`)**
    - Base score 100.0 with deterministic transparent deductions:
      `CRITICAL = 25`, `HIGH = 10`, `MEDIUM = 4`, `LOW = 1`, `INFO = 0`.
    - Deduplication safeguard: maximum penalty applied to any single column capped at 25.0 points.
    - Rating labels: Production-oriented readiness ($90-100$), Minor remediation ($75-89$), Significant preprocessing ($50-74$), High risk / substantial remediation ($0-49$).
    - Returns complete explainable itemized penalty breakdown and mandatory disclaimer.
-7. **Pipeline & Services Integration (`app/engine/pipeline.py`, `app/services/analysis_service.py`)**
-   - Pipeline orchestrates all 10 modules in strict deterministic order.
-   - Aggregates comprehensive summary metrics and heuristic breakdown.
-   - Asynchronous worker persists findings, `ml_readiness_score`, and `heuristic_breakdown` to database.
+7. **Pipeline Architecture & Module Inventory (`app/engine/pipeline.py`)**
+   - The pipeline orchestrates 10 analyzers and 1 scoring heuristic in strict deterministic sequence:
+     ```text
+     Phase 2 Foundational Analyzers:
+     - Module 1: Schema Analyzer
+     - Module 2: Data Type Analyzer
+     - Module 3: Missing Value Analyzer
+     - Module 4: Duplicate Analyzer
+     - Module 5: Cardinality Analyzer
+         ├── Constant / Low-cardinality detection
+         ├── Near-constant detection
+         ├── High-cardinality detection
+         └── Identifier-like advisory detection
+     Phase 3 Advanced Diagnostic Analyzers:
+     - Module 6: Outlier Analyzer
+     - Module 7: Distribution Analyzer
+     - Module 8: Correlation Analyzer
+     - Module 9: Class Imbalance Analyzer
+     - Module 10: Data Leakage Analyzer
+     Scoring:
+     - ML Readiness Heuristic Scorer
+     ```
 8. **API Endpoints (`app/api/v1/analyses.py`)**
-   - `POST /api/v1/datasets/{dataset_id}/versions/{version_id}/analyze`: Accepts `target_column`, `problem_type`, and custom parameters overriding defaults.
+   - `POST /api/v1/datasets/{dataset_id}/versions/{version_id}/analyze`: Accepts `target_column`, `problem_type`, and custom parameters overriding defaults; returns `HTTP 202 Accepted` with initial status `PENDING`.
    - `GET /api/v1/analyses/{run_id}`: Returns run status, execution time, `ml_readiness_score`, `heuristic_breakdown`, and `summary_metrics`.
    - `GET /api/v1/analyses/{run_id}/heuristic`: Returns `HeuristicBreakdownRead` with full itemized penalty explanations.
    - `GET /api/v1/analyses/{run_id}/issues`: Returns paginated quality issues with severity/module/column filtering.
@@ -58,13 +76,13 @@ Dataset Doctor has completed **Phase 3: Advanced Statistical & ML Analysis**. Th
 ## 2. Verification Results
 
 ### 2.1 Pytest Suite
-- **Total Tests**: 115 tests executed across 21 test suites.
-- **Result**: 115 passed, 0 failed in 3.55 seconds (`pytest -v`).
+- **Total Tests**: 116 tests executed across 21 test suites.
+- **Result**: 116 passed, 0 failed in 3.01 seconds (`pytest -v`).
 - **Target Phase 3 Modules**:
   - `tests/test_outlier_analyzer.py`: 8 passed
   - `tests/test_distribution_analyzer.py`: 7 passed
   - `tests/test_correlation_analyzer.py`: 9 passed
-  - `tests/test_imbalance_analyzer.py`: 9 passed
+  - `tests/test_imbalance_analyzer.py`: 10 passed
   - `tests/test_leakage_analyzer.py`: 7 passed
   - `tests/test_scoring.py`: 5 passed
   - `tests/test_cross_module.py`: 5 passed
@@ -83,10 +101,10 @@ Dataset Doctor has completed **Phase 3: Advanced Statistical & ML Analysis**. Th
 ### 2.3 Performance Benchmark
 - Evaluated on synthetic dataset with 5,000 rows $\times$ 20 numerical features and binary target (`tests/test_performance.py`).
 - Execution time: **0.817 seconds**.
-- Complexity safeguards verified: `analysis_limited = True`, sampling applied, bounded memory usage.
+- Complexity safeguards verified: `analysis_limited = True`, sampling applied. No memory leak was observed during the configured benchmark run.
 
 ### 2.4 Live PostgreSQL 18 Verification
-- Tested against native PostgreSQL 18 on host port `5433`.
+- Docker engine was not locally available on Windows host (`ObjectNotFound: CommandNotFoundException`). Verified against native PostgreSQL 18 on host port `5433`.
 - `alembic upgrade head` and `alembic check` executed with 100% schema alignment (`No new upgrade operations detected`).
 - Live end-to-end execution of Phase 3 dataset upload, analysis trigger (`POST /analyze` 202 Accepted), and relational persistence.
 - Verified in database:

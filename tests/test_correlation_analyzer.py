@@ -92,6 +92,12 @@ def test_correlation_analyzer_severity_boundaries():
     assert analyzer._determine_severity(0.99) == Severity.HIGH
     assert analyzer._determine_severity(1.0) == Severity.HIGH
 
+    # Test custom parameter thresholds
+    assert analyzer._determine_severity(0.82, low_thresh=0.80, med_thresh=0.90, high_thresh=0.95) == Severity.LOW
+    assert analyzer._determine_severity(0.92, low_thresh=0.80, med_thresh=0.90, high_thresh=0.95) == Severity.MEDIUM
+    assert analyzer._determine_severity(0.96, low_thresh=0.80, med_thresh=0.90, high_thresh=0.95) == Severity.HIGH
+
+
 
 def test_correlation_analyzer_constant_column_exclusion():
     """Test that constant columns are excluded and do not crash correlation calculation."""

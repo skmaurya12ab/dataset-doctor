@@ -89,25 +89,49 @@ def test_imbalance_analyzer_extreme_imbalance_critical(fixtures_dir: Path):
 
 
 def test_imbalance_analyzer_binary_exact_boundaries():
-    """Test exact binary boundary transitions."""
+    """Test exact binary boundary transitions for both majority policy and equivalent minority percentages."""
     analyzer = ClassImbalanceAnalyzer()
 
-    # 60.0% -> no issue
+    # Majority <= 60.0% (Minority >= 40.0%) -> no issue
     assert analyzer._determine_binary_severity(60.0) is None
-    # 60.1% -> LOW
+    # Majority 60.1% (Minority 39.9%) -> LOW
     assert analyzer._determine_binary_severity(60.1) == Severity.LOW
-    # 75.0% -> LOW
+    # Majority 75.0% (Minority 25.0%) -> LOW
     assert analyzer._determine_binary_severity(75.0) == Severity.LOW
-    # 75.1% -> MEDIUM
+    # Majority 75.1% (Minority 24.9%) -> MEDIUM
     assert analyzer._determine_binary_severity(75.1) == Severity.MEDIUM
-    # 90.0% -> MEDIUM
+    # Majority 90.0% (Minority 10.0%) -> MEDIUM
     assert analyzer._determine_binary_severity(90.0) == Severity.MEDIUM
-    # 90.1% -> HIGH
+    # Majority 90.1% (Minority 9.9%) -> HIGH
     assert analyzer._determine_binary_severity(90.1) == Severity.HIGH
-    # 95.0% -> HIGH
+    # Majority 95.0% (Minority 5.0%) -> HIGH
     assert analyzer._determine_binary_severity(95.0) == Severity.HIGH
-    # 95.1% -> CRITICAL
+    # Majority 95.1% (Minority 4.9%) -> CRITICAL
     assert analyzer._determine_binary_severity(95.1) == Severity.CRITICAL
+
+    # Verify custom parameter overrides
+    custom_severity = analyzer._determine_binary_severity(
+        majority_pct=80.0,
+        low_pct=55.0,
+        med_pct=70.0,
+        high_pct=85.0,
+        crit_pct=95.0,
+    )
+    assert custom_severity == Severity.MEDIUM
+
+
+def test_imbalance_analyzer_evaluation_basis_in_metrics():
+    """Test that metrics explicitly document evaluation_basis as majority_percentage."""
+    df = pd.DataFrame({"target": [0] * 70 + [1] * 30})
+    analyzer = ClassImbalanceAnalyzer()
+    ctx = AnalysisContext(dataset_version_id="ver_basis", df=df, target_column="target")
+    result = analyzer.analyze(ctx)
+
+    assert result.metrics["evaluation_basis"] == "majority_percentage"
+    assert result.metrics["majority_percentage"] == 70.0
+    assert result.metrics["minority_percentage"] == 30.0
+    assert result.issues[0].severity == Severity.LOW
+
 
 
 def test_imbalance_analyzer_multiclass(fixtures_dir: Path):

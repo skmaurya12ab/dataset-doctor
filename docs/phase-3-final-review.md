@@ -94,8 +94,8 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Evidence Stored:** `method`, `column`, `outlier_count`, `total_non_null`, `outlier_percentage`, `q1`, `q3`, `iqr`, `lower_bound`, `upper_bound`, `mad_evidence`.
 - **Safe Skipping:** Skips non-numeric columns, all-null columns, and columns with $< 4$ valid entries. Suppresses IQR when $\text{IQR} = 0.0$. Skips Isolation Forest when $< 2$ numeric non-constant features or $< 20$ rows.
 - **Known Limitations:** Evaluates IQR univariately per column. Heavily skewed data will flag legitimate extreme values.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
-
+- **Specification Compliance:** Fully implements univariate IQR bounds, zero-IQR suppression with MAD fallback, and multivariate Isolation Forest with bounded sampling.
+ 
 ### 2. `distribution_analyzer.py`
 - **File Path:** [`app/engine/modules/distribution_analyzer.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/distribution_analyzer.py)
 - **Class Name:** `DistributionAnalyzer`
@@ -112,7 +112,7 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Evidence Stored:** `skewness`, `kurtosis`, `mean`, `median`, `std`, `normality_test` (dict with `statistic`, `p_value`, `sample_size`, `is_normal_p05`).
 - **Safe Skipping:** Skips columns with $< 3$ non-null values. Suppresses constant features ($\text{std} = 0.0$). Normality test skipped if $< 20$ samples.
 - **Known Limitations:** Normal distribution tests can reject $H_0$ on large sample sizes even for negligible departures from normality.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Implements 7 summary moments, Fisher skewness, excess kurtosis, and D'Agostino-Pearson $K^2$ normality test with sample size guards ($N \ge 20$).
 
 ### 3. `correlation_analyzer.py`
 - **File Path:** [`app/engine/modules/correlation_analyzer.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/correlation_analyzer.py)
@@ -126,11 +126,15 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Thresholds Used:** `correlation_threshold`: 0.90, `medium_threshold`: 0.95, `high_threshold`: 0.99, `max_features`: 100, `sample_size`: 50,000, `random_seed`: 42.
 - **Parameters Recorded:** Full parameter dictionary via `to_json_safe(params)`.
 - **Issue Trigger:** Pairwise absolute Pearson correlation $|r| \ge 0.90$.
-- **Severity Mapping:** $0.90 \le |r| < 0.95 \rightarrow$ `LOW`, $0.95 \le |r| < 0.99 \rightarrow$ `MEDIUM`, $|r| \ge 0.99 \rightarrow$ `HIGH`.
+- **Severity Mapping:**
+  - $|r| < 0.90 \rightarrow$ no issue (None)
+  - $0.90 \le |r| < 0.95 \rightarrow$ `LOW`
+  - $0.95 \le |r| < 0.99 \rightarrow$ `MEDIUM`
+  - $|r| \ge 0.99 \rightarrow$ `HIGH`
 - **Evidence Stored:** `feature_a`, `feature_b`, `pearson_correlation`, `abs_pearson_correlation`, `spearman_correlation`.
 - **Safe Skipping:** Skips entire module if $< 2$ non-constant numeric features exist. Prunes constant columns ($\text{std} = 0$) prior to matrix computation. Caps at `max_features` with `INFO` issue.
 - **Known Limitations:** Pairwise correlation only captures linear (Pearson) or monotonic (Spearman) relationships; non-linear dependencies are not captured.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Implements Pearson and Spearman matrices with exact threshold policy ($0.90$ LOW, $0.95$ MEDIUM, $0.99$ HIGH), upper-triangle deduplication, and feature caps.
 
 ### 4. `imbalance_analyzer.py`
 - **File Path:** [`app/engine/modules/imbalance_analyzer.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/imbalance_analyzer.py)
@@ -138,17 +142,17 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Analyzer Version:** `1.0.0`
 - **Detection Methods Implemented:**
   1. Target label frequency count, percentages, and imbalance ratio ($\text{majority} / \text{minority}$).
-  2. Binary classification skew evaluation.
-  3. Multiclass density evaluation.
+  2. Binary classification skew evaluation based on majority-class percentage.
+  3. Multiclass density evaluation using class ratio and minority density.
   4. Tiny class starvation detection ($< 10$ samples).
 - **Thresholds Used:** `binary_low_threshold_pct`: 60.0%, `binary_medium_threshold_pct`: 75.0%, `binary_high_threshold_pct`: 90.0%, `binary_critical_threshold_pct`: 95.0%, `tiny_class_sample_threshold`: 10.
 - **Parameters Recorded:** Full parameter dictionary via `to_json_safe(params)`.
 - **Issue Trigger:** Binary majority class $> 60.0\%$, multiclass minority starvation, or any class with $< 10$ samples.
 - **Severity Mapping:** Binary: $>60\%$ `LOW`, $>75\%$ `MEDIUM`, $>90\%$ `HIGH`, $>95\%$ `CRITICAL`. Tiny class: `LOW`.
-- **Evidence Stored:** `target_column`, `total_samples`, `class_count`, `class_distribution`, `class_percentages`, `majority_class`, `minority_class`, `imbalance_ratio`, `has_tiny_classes`.
+- **Evidence Stored:** `target_column`, `total_samples`, `class_count`, `class_distribution`, `class_percentages`, `majority_class`, `minority_class`, `imbalance_ratio`, `evaluation_basis: majority_percentage`, `has_tiny_classes`.
 - **Safe Skipping:** Skips safely if target column is omitted, not found, problem type is regression, target is continuous numerical ($>20$ unique float values), single-class target, or $< 2$ samples.
-- **Known Limitations:** Heuristic assumes standard binary and multiclass setups; does not evaluate multi-label classification.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Known Limitations:** Evaluates supervised target distributions; requires explicit `target_column`.
+- **Specification Compliance:** Implements binary classification severity based on canonical majority-class percentage policy ($>60\%$ LOW, $>75\%$ MEDIUM, $>90\%$ HIGH, $>95\%$ CRITICAL), tiny-class protection ($< 10$ samples), and separate multiclass heuristic.
 
 ### 5. `leakage_analyzer.py`
 - **File Path:** [`app/engine/modules/leakage_analyzer.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/leakage_analyzer.py)
@@ -166,7 +170,7 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Evidence Stored:** Match ratios, correlation coefficients, conditional purities, matched keyword lists.
 - **Safe Skipping:** Skips if target column is omitted, not found in dataframe, or dataset has $< 10$ rows.
 - **Known Limitations:** Data leakage detection is inherently a heuristic based on available columns; true leakage often depends on external event timestamp metadata not present in tabular uploads.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Implements Signals A (identity $\ge 0.99$), B (correlation $\ge 0.99$), C (categorical purity $\ge 0.99$), and D (suspicious lexical names strictly INFO).
 
 ### 6. `scoring.py`
 - **File Path:** [`app/engine/scoring.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/scoring.py)
@@ -177,24 +181,44 @@ Detailed inventory of actual code inspected in `app/engine/`:
 - **Evidence / Output Stored:** `HeuristicBreakdown` dataclass containing `heuristic_score`, `rating`, `base_score`, `total_penalties`, `itemized_penalties`, `disclaimer`.
 - **Safe Skipping:** Operates on an empty list of issues safely (returns perfect score 100.0).
 - **Known Limitations:** Heuristic measure of data hygiene; does not predict model accuracy or performance.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Implements deterministic deductions from 100.0 with 25.0 max-penalty-per-column deduplication, 0.0 floor, and transparent itemization.
 
 ### 7. `pipeline.py`
 - **File Path:** [`app/engine/pipeline.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/pipeline.py)
 - **Class Name:** `AnalysisPipeline`
-- **Role:** Sequences all 10 modules in strict deterministic order (Schema $\rightarrow$ DType $\rightarrow$ Missing $\rightarrow$ Duplicate $\rightarrow$ Cardinality $\rightarrow$ Outlier $\rightarrow$ Distribution $\rightarrow$ Correlation $\rightarrow$ Imbalance $\rightarrow$ Leakage), aggregates metrics and issues, invokes heuristic scorer, and builds centralized `summary_metrics`.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Role:** Sequences all 10 modules in strict deterministic order:
+  ```text
+  Phase 2 Foundational Analyzers:
+  - Module 1: Schema Analyzer
+  - Module 2: Data Type Analyzer
+  - Module 3: Missing Value Analyzer
+  - Module 4: Duplicate Analyzer
+  - Module 5: Cardinality Analyzer
+      ├── Constant / Low-cardinality detection
+      ├── Near-constant detection
+      ├── High-cardinality detection
+      └── Identifier-like advisory detection
+  Phase 3 Advanced Diagnostic Analyzers:
+  - Module 6: Outlier Analyzer
+  - Module 7: Distribution Analyzer
+  - Module 8: Correlation Analyzer
+  - Module 9: Class Imbalance Analyzer
+  - Module 10: Data Leakage Analyzer
+  Scoring:
+  - ML Readiness Heuristic Scorer
+  ```
+- **Specification Compliance:** Sequentially executes registered analyzers in deterministic order and aggregates metrics and issues.
 
 ### 8. `analysis_service.py`
 - **File Path:** [`app/services/analysis_service.py`](file:///e:/Agentic%20AI/Antigravity/app/services/analysis_service.py)
 - **Class Name:** `AnalysisService`
 - **Role:** Manages analysis lifecycle transitions (`PENDING` $\rightarrow$ `RUNNING` $\rightarrow$ `COMPLETED` / `FAILED`), provides isolated DB sessions for worker threads, supports `execute_directly` for synchronous testing, and persists `AnalysisRun` and `QualityIssue` records with JSONB fields.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Implements asynchronous job dispatching with `HTTP 202 Accepted` and `status: PENDING`.
 
 ### 9. `defaults.py`
 - **File Path:** [`app/engine/defaults.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/defaults.py)
 - **Role:** Central repository of default parameters for all 10 analyzers and scoring.
-- **Specification Compliance:** Matches Phase 3 specification exactly.
+- **Specification Compliance:** Centralizes default configuration constants across modules.
 
 ---
 
@@ -449,7 +473,7 @@ Real performance test executed: `tests/test_performance.py::test_performance_mod
   - **Correlation Feature Cap:** Dataset contained 20 numerical features; parameter `max_features = 15` was applied. Result: `analysis_limited = True`, exactly 15 features analyzed.
   - **Correlation Sampling:** Parameter `max_sample_size = 1000` applied. Result: `sampling_applied = True`, sample size = 1,000.
   - **Outlier Sampling:** Isolation Forest parameter `maximum_sample_size = 1000` applied. Result: `sampling_applied = True`, sample size = 1,000.
-* **Memory Concerns:** None observed. Synthetic test memory footprint remained well within normal Python bounds.
+* **Memory Concerns:** No memory leak was observed during the configured benchmark run. Memory footprint remained well within normal Python process bounds.
 
 ---
 
@@ -551,7 +575,7 @@ Source inspection was performed across all Phase 3 files.
 | **Signal B: Extreme Numerical Correlation** | YES | YES | [`leakage_analyzer.py:145-190`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/leakage_analyzer.py#L145-L190), `test_leakage_analyzer_extreme_numerical_correlation` |
 | **Signal C: Categorical Conditional Purity** | YES | YES | [`leakage_analyzer.py:191-236`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/leakage_analyzer.py#L191-L236), `test_leakage_analyzer_categorical_perfect_mapping` |
 | **Signal D: Suspicious Names Strictly `INFO`** | YES | YES | [`leakage_analyzer.py:237-270`](file:///e:/Agentic%20AI/Antigravity/app/engine/modules/leakage_analyzer.py#L237-L270), `test_leakage_analyzer_suspicious_name_only_is_strictly_info` |
-| **Module 11: ML Readiness Heuristic** | YES | YES | [`scoring.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/scoring.py), [`test_scoring.py`](file:///e:/Agentic%20AI/Antigravity/tests/test_scoring.py) |
+| **ML Readiness Heuristic Scoring** | YES | YES | [`scoring.py`](file:///e:/Agentic%20AI/Antigravity/app/engine/scoring.py), [`test_scoring.py`](file:///e:/Agentic%20AI/Antigravity/tests/test_scoring.py) |
 | **Penalty Deduplication (Max 25 pts/col)** | YES | YES | [`scoring.py:71-79`](file:///e:/Agentic%20AI/Antigravity/app/engine/scoring.py#L71-L79), `test_scoring_per_column_penalty_deduplication` |
 | **Itemized Deductions & Disclaimer** | YES | YES | [`scoring.py:81-110`](file:///e:/Agentic%20AI/Antigravity/app/engine/scoring.py#L81-L110), `test_scoring_penalty_weights_and_itemization` |
 | **Deterministic Ordering (All 10 Analyzers)** | YES | YES | [`pipeline.py:25-41`](file:///e:/Agentic%20AI/Antigravity/app/engine/pipeline.py#L25-L41), `test_pipeline_executes_all_ten_analyzers_in_order` |

@@ -172,13 +172,20 @@ class ClassImbalanceAnalyzer(BaseAnalyzer):
             "majority_percentage": majority_pct,
             "minority_percentage": minority_pct,
             "imbalance_ratio": imbalance_ratio,
+            "evaluation_basis": "majority_percentage",
             "has_tiny_classes": has_tiny_classes,
         }
 
         # 4. Severity Assessment
         if class_count == 2:
-            # Binary Classification
-            severity = self._determine_binary_severity(majority_pct)
+            # Binary Classification evaluated on canonical majority-class percentage
+            severity = self._determine_binary_severity(
+                majority_pct,
+                low_pct=low_pct,
+                med_pct=med_pct,
+                high_pct=high_pct,
+                crit_pct=crit_pct,
+            )
             if severity is not None:
                 issues.append(
                     QualityIssueData(
@@ -203,7 +210,7 @@ class ClassImbalanceAnalyzer(BaseAnalyzer):
                     )
                 )
         else:
-            # Multiclass Classification
+            # Multiclass Classification: separate heuristic using ratio and minority density
             expected_balanced_pct = 100.0 / class_count
             if minority_pct < expected_balanced_pct * 0.3 or majority_pct > 60.0:
                 if minority_pct < 2.0 or majority_pct > 80.0:
@@ -270,14 +277,36 @@ class ClassImbalanceAnalyzer(BaseAnalyzer):
             issues=issues,
         )
 
-    def _determine_binary_severity(self, majority_pct: float) -> Optional[Severity]:
-        """Determine heuristic severity for binary classification majority percentage."""
-        if majority_pct > 95.0:
+    def _determine_binary_severity(
+        self,
+        majority_pct: float,
+        low_pct: float = 60.0,
+        med_pct: float = 75.0,
+        high_pct: float = 90.0,
+        crit_pct: float = 95.0,
+    ) -> Optional[Severity]:
+        """Determine heuristic severity for binary classification target distribution.
+
+        Canonical Policy (Majority Class Percentage):
+        majority <= 60%     → no issue (None)
+        >60% to 75%         → LOW
+        >75% to 90%         → MEDIUM
+        >90% to 95%         → HIGH
+        >95%                → CRITICAL
+
+        Equivalent Minority Class Percentage (minority = 100 - majority):
+        minority >= 40%     → no issue (None)
+        25% <= minority < 40% (canonical ~30-40%) → LOW
+        10% <= minority < 25% (canonical ~10-30%) → MEDIUM
+        5% <= minority < 10%  → HIGH
+        minority < 5%         → CRITICAL
+        """
+        if majority_pct > crit_pct:
             return Severity.CRITICAL
-        elif majority_pct > 90.0:
+        elif majority_pct > high_pct:
             return Severity.HIGH
-        elif majority_pct > 75.0:
+        elif majority_pct > med_pct:
             return Severity.MEDIUM
-        elif majority_pct > 60.0:
+        elif majority_pct > low_pct:
             return Severity.LOW
         return None
