@@ -50,6 +50,34 @@ def get_analysis_service(
     return AnalysisService(job_runner=job_runner)
 
 
+def get_llm_provider(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> "BaseLLMProvider":
+    """Dependency provider for the abstract BaseLLMProvider."""
+    from app.services.ai.mock_provider import MockLLMProvider
+    from app.services.ai.openai_provider import OpenAIResponsesProvider
+
+    if settings.openai_api_key:
+        return OpenAIResponsesProvider(
+            api_key=settings.openai_api_key,
+            model=settings.openai_model,
+            timeout_seconds=settings.openai_timeout_seconds,
+            max_retries=settings.openai_max_retries,
+            retry_backoff=settings.openai_retry_backoff,
+            max_output_tokens=settings.openai_max_output_tokens,
+        )
+    return MockLLMProvider(model_name=settings.openai_model)
+
+
+def get_ai_service(
+    provider: Annotated["BaseLLMProvider", Depends(get_llm_provider)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> "AIService":
+    """Dependency provider for AIService orchestration."""
+    from app.services.ai.ai_service import AIService
+    return AIService(provider=provider, settings=settings)
+
+
 async def shutdown_job_runner() -> None:
     """Shutdown job runner on application stop."""
     global _job_runner
@@ -65,4 +93,7 @@ JobRunnerDep = Annotated[AnalysisJobRunner, Depends(get_job_runner)]
 StorageServiceDep = Annotated[FileStorageService, Depends(get_storage_service)]
 IngestionServiceDep = Annotated[DatasetIngestionService, Depends(get_ingestion_service)]
 AnalysisServiceDep = Annotated["AnalysisService", Depends(get_analysis_service)]
+LLMProviderDep = Annotated["BaseLLMProvider", Depends(get_llm_provider)]
+AIServiceDep = Annotated["AIService", Depends(get_ai_service)]
+
 

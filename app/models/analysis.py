@@ -104,7 +104,7 @@ class AnalysisRun(Base):
     )
 
     # Relationships
-    dataset_version = relationship("DatasetVersion")
+    dataset_version = relationship("DatasetVersion", lazy="selectin")
     issues: Mapped[List["QualityIssue"]] = relationship(
         "QualityIssue",
         back_populates="analysis_run",

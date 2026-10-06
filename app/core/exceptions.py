@@ -58,3 +58,32 @@ class ValidationException(DatasetDoctorException):
     def __init__(self, details: str):
         super().__init__(f"Validation error: {details}", status_code=422)
 
+
+class AIProviderUnavailableException(DatasetDoctorException):
+    """Raised when the AI provider cannot be reached or times out."""
+
+    def __init__(self, details: str = "AI interpretation provider is currently unreachable"):
+        super().__init__(f"Service Unavailable: {details}", status_code=503)
+
+
+class AIProviderOutputException(DatasetDoctorException):
+    """Raised when the AI provider returns malformed, unparseable, or invalid output."""
+
+    def __init__(self, details: str = "Invalid output received from AI provider"):
+        super().__init__(f"Bad Gateway: {details}", status_code=502)
+
+
+class AIRefusalException(DatasetDoctorException):
+    """Raised when the AI provider explicitly refuses to complete the request."""
+
+    def __init__(self, refusal_reason: str):
+        super().__init__(f"AI Provider Refusal: {refusal_reason}", status_code=502)
+
+
+class InvalidTransformationException(DatasetDoctorException):
+    """Raised when proposed transformation violates allowlist or parameter boundaries."""
+
+    def __init__(self, details: str):
+        super().__init__(f"Invalid Transformation: {details}", status_code=400)
+
+

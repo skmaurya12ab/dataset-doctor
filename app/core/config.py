@@ -52,6 +52,34 @@ class Settings(BaseSettings):
         default="gpt-4o-2024-08-06",
         description="Target model for structured reasoning and interpretation",
     )
+    openai_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0.0,
+        description="Timeout in seconds for AI provider requests",
+    )
+    openai_max_retries: int = Field(
+        default=3,
+        ge=0,
+        le=10,
+        description="Maximum retry attempts for transient AI provider failures",
+    )
+    openai_retry_backoff: float = Field(
+        default=1.5,
+        gt=0.0,
+        description="Exponential backoff factor for retries",
+    )
+    openai_max_input_tokens: int = Field(
+        default=3500,
+        ge=500,
+        le=16000,
+        description="Token budget cap for findings digest sent to the LLM",
+    )
+    openai_max_output_tokens: int = Field(
+        default=2000,
+        ge=100,
+        le=8000,
+        description="Maximum output tokens for AI structured completions",
+    )
 
     # Logging Settings
     log_level: str = Field(

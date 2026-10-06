@@ -2,20 +2,26 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 3 complete — Advanced statistical & ML analysis engine operational across 10 deterministic profiling modules with ML Readiness Heuristic, PostgreSQL persistence, provenance tracking, and REST API.`
+> **Status:** `Phase 4 complete — Grounded AI interpretation, structured defect explanation, and advisory remediation planning operational via modern OpenAI Responses API, token-bounded findings digest, and transformation allowlists.`
 
 ### Project Roadmap Status
 - **Phase 0 — Foundations & Core Abstractions**: ✅
 - **Phase 1 — Ingestion & Immutable Dataset Versioning**: ✅
 - **Phase 2 — Core Deterministic Analysis**: ✅
 - **Phase 3 — Advanced Statistical & ML Analysis**: ✅
-- **Phase 4 — AI Remediation & Action Planning**: 🚧 Next
+- **Phase 4 — AI Provider, Grounded Explanations & Remediation Planning**: ✅
+- **Phase 5 — Deterministic Transformation Execution & Verification**: 🚧 Next
 
 ---
 
 ## Core Architectural Principle
 
 **Python calculates factual statistics and findings. The LLM interprets those structured findings. The LLM is never responsible for calculating raw statistics.**
+
+> [!NOTE]
+> **Advisory Nature of AI Outputs**:
+> All AI suggestions, finding explanations, and remediation plans are strictly advisory and require human review.
+> The AI layer never executes code, modifies datasets, or runs arbitrary commands. Actual data transformations are deterministically executed in Phase 5 only upon explicit human approval.
 
 ---
 
@@ -101,8 +107,13 @@ Dataset Doctor decouples deterministic data analysis from AI interpretation:
 | `MAX_UPLOAD_SIZE_MB`| `100` | Maximum allowed file upload size in MB |
 | `LOG_LEVEL` | `"INFO"` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `MAX_WORKER_THREADS`| `4` | Worker threads for analysis job runner |
-| `OPENAI_API_KEY` | `""` | OpenAI API key placeholder |
+| `OPENAI_API_KEY` | `None` | OpenAI API key for structured interpretation |
 | `OPENAI_MODEL` | `"gpt-4o-2024-08-06"` | Target model for AI interpretation |
+| `OPENAI_TIMEOUT_SECONDS` | `30.0` | Request timeout in seconds for AI calls |
+| `OPENAI_MAX_RETRIES` | `3` | Maximum retry attempts for transient AI errors |
+| `OPENAI_RETRY_BACKOFF` | `1.5` | Exponential backoff multiplier for retries |
+| `OPENAI_MAX_INPUT_TOKENS` | `3500` | Token budget cap for findings digest |
+| `OPENAI_MAX_OUTPUT_TOKENS` | `2000` | Maximum output tokens for structured completions |
 
 ---
 
