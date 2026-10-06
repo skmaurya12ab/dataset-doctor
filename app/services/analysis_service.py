@@ -320,3 +320,177 @@ class AnalysisService:
         items = list(items_res.scalars().all())
 
         return items, total
+
+    async def list_analyses_for_version(
+        self,
+        db: AsyncSession,
+        version_id: uuid.UUID,
+    ) -> List[AnalysisRun]:
+        """Fetch all analysis runs for a dataset version ordered by most recent."""
+        stmt = (
+            select(AnalysisRun)
+            .where(AnalysisRun.dataset_version_id == version_id)
+            .order_by(AnalysisRun.created_at.desc())
+        )
+        res = await db.execute(stmt)
+        return list(res.scalars().all())
+
+    async def get_visualization_data(
+        self,
+        db: AsyncSession,
+        run_id: uuid.UUID,
+    ) -> Dict[str, Any]:
+        """Assemble structured, server-bounded analytical series for Plotly visualizations."""
+        run = await self.get_analysis(db=db, run_id=run_id)
+        if not run:
+            raise EntityNotFoundException("AnalysisRun", str(run_id))
+
+        issues, _ = await self.get_analysis_issues(db=db, run_id=run_id, limit=200)
+
+        missing_data: List[Dict[str, Any]] = []
+        cardinality_data: List[Dict[str, Any]] = []
+        outlier_data: List[Dict[str, Any]] = []
+        distribution_data: List[Dict[str, Any]] = []
+        correlation_pairs: List[Dict[str, Any]] = []
+        imbalance_data: Optional[Dict[str, Any]] = None
+
+        for iss in issues:
+            ev = iss.evidence or {}
+            if iss.module == "missing_analyzer" and iss.column_name:
+                missing_data.append({
+                    "column": iss.column_name,
+                    "null_count": ev.get("null_count", 0),
+                    "null_percentage": ev.get("null_percentage", 0.0),
+                    "severity": iss.severity,
+                })
+            elif iss.module == "cardinality_analyzer" and iss.column_name:
+                cardinality_data.append({
+                    "column": iss.column_name,
+                    "unique_count": ev.get("unique_count", 0),
+                    "unique_ratio": ev.get("unique_ratio", 0.0),
+                    "classification": ev.get("classification", "NORMAL"),
+                    "severity": iss.severity,
+                })
+            elif iss.module == "outlier_analyzer" and iss.column_name:
+                outlier_data.append({
+                    "column": iss.column_name,
+                    "outlier_count": ev.get("outlier_count", 0),
+                    "outlier_percentage": ev.get("outlier_percentage", 0.0),
+                    "lower_bound": ev.get("lower_bound"),
+                    "upper_bound": ev.get("upper_bound"),
+                    "method": ev.get("method", "IQR"),
+                    "severity": iss.severity,
+                })
+            elif iss.module == "distribution_analyzer" and iss.column_name:
+                distribution_data.append({
+                    "column": iss.column_name,
+                    "mean": ev.get("mean"),
+                    "median": ev.get("median"),
+                    "std": ev.get("std"),
+                    "min": ev.get("min"),
+                    "q25": ev.get("q25"),
+                    "q75": ev.get("q75"),
+                    "max": ev.get("max"),
+                    "skewness": ev.get("skewness"),
+                    "kurtosis": ev.get("kurtosis"),
+                    "severity": iss.severity,
+                })
+            elif iss.module == "correlation_analyzer":
+                correlation_pairs.append({
+                    "col1": ev.get("feature_a") or iss.column_name,
+                    "col2": ev.get("feature_b"),
+                    "pearson": ev.get("pearson"),
+                    "spearman": ev.get("spearman"),
+                    "severity": iss.severity,
+                })
+            elif iss.module == "imbalance_analyzer":
+                imbalance_data = {
+                    "target_column": iss.column_name or run.target_column,
+                    "classes": ev.get("classes") or ev.get("class_distribution", []),
+                    "imbalance_ratio": ev.get("imbalance_ratio"),
+                    "severity": iss.severity,
+                }
+
+        # Sort missing values descending by percentage
+        missing_data.sort(key=lambda x: x["null_percentage"], reverse=True)
+
+        return {
+            "missing_values": missing_data,
+            "cardinality": cardinality_data,
+            "outliers": outlier_data,
+            "distributions": distribution_data,
+            "correlations": {"pairs": correlation_pairs},
+            "class_imbalance": imbalance_data,
+            "summary": {
+                "score": run.ml_readiness_score,
+                "rating": run.summary_metrics.get("ml_readiness_rating"),
+                "total_issues": run.total_issues_count,
+                "critical_issues": run.critical_issues_count,
+            },
+        }
+
+    async def get_overview_stats(self, db: AsyncSession) -> Dict[str, Any]:
+        """Aggregate high-level overview metrics across all datasets, runs, and defects."""
+        from app.models.dataset import Dataset, DatasetVersion
+        from app.models.remediation import RemediationExecution
+
+        total_datasets = (await db.execute(select(func.count(Dataset.id)))).scalar() or 0
+        total_versions = (await db.execute(select(func.count(DatasetVersion.id)))).scalar() or 0
+        running_analyses = (
+            await db.execute(
+                select(func.count(AnalysisRun.id)).where(AnalysisRun.status == AnalysisStatus.RUNNING.value)
+            )
+        ).scalar() or 0
+
+        latest_runs_res = await db.execute(
+            select(AnalysisRun).order_by(AnalysisRun.created_at.desc()).limit(5)
+        )
+        latest_runs = list(latest_runs_res.scalars().all())
+
+        latest_rems_res = await db.execute(
+            select(RemediationExecution).order_by(RemediationExecution.created_at.desc()).limit(5)
+        )
+        latest_rems = list(latest_rems_res.scalars().all())
+        latest_rems_dicts = [
+            {
+                "id": str(r.id),
+                "analysis_run_id": str(r.analysis_run_id),
+                "status": r.status,
+                "approved_by": r.approved_by,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "result_version_id": str(r.result_dataset_version_id) if r.result_dataset_version_id else None,
+            }
+            for r in latest_rems
+        ]
+
+        crit_issues = (
+            await db.execute(
+                select(func.count(QualityIssue.id)).where(QualityIssue.severity == "CRITICAL")
+            )
+        ).scalar() or 0
+
+        high_issues = (
+            await db.execute(
+                select(func.count(QualityIssue.id)).where(QualityIssue.severity == "HIGH")
+            )
+        ).scalar() or 0
+
+        avg_score = (
+            await db.execute(
+                select(func.avg(AnalysisRun.ml_readiness_score)).where(
+                    AnalysisRun.status == AnalysisStatus.COMPLETED.value
+                )
+            )
+        ).scalar()
+
+        return {
+            "total_datasets": total_datasets,
+            "total_versions": total_versions,
+            "running_analyses_count": running_analyses,
+            "latest_analyses": latest_runs,
+            "recent_remediations": latest_rems_dicts,
+            "unresolved_critical_issues_count": crit_issues,
+            "unresolved_high_issues_count": high_issues,
+            "average_readiness_score": round(float(avg_score), 1) if avg_score is not None else None,
+        }
+

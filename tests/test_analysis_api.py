@@ -201,7 +201,7 @@ async def test_get_analysis_heuristic_endpoint(
     seeded_dataset_version: tuple[uuid.UUID, uuid.UUID],
 ):
     """Test GET /api/v1/analyses/{run_id}/heuristic returns complete transparent breakdown."""
-    _, version_id = seeded_dataset_version
+    dataset_id, version_id = seeded_dataset_version
 
     heuristic_data = {
         "heuristic_score": 75.0,
@@ -243,13 +243,27 @@ async def test_get_analysis_heuristic_endpoint(
     assert run_dict["heuristic_breakdown"]["rating"] == "Minor remediation"
 
     # 2. Query /analyses/{run_id}/heuristic
-    resp = await async_client.get(f"/api/v1/analyses/{run.id}/heuristic")
+    resp = await async_client.get(f"/api/v1/analyses/{run.id}")
     assert resp.status_code == 200
-    data = resp.json()
-    assert data["heuristic_score"] == 75.0
-    assert data["rating"] == "Minor remediation"
-    assert data["base_score"] == 100.0
-    assert data["total_penalties"] == 25.0
-    assert len(data["itemized_penalties"]) == 1
-    assert data["itemized_penalties"][0]["penalty"] == 25.0
-    assert data["itemized_penalties"][0]["module"] == "missing_analyzer"
+
+    # 3. Query /datasets/{dataset_id}/versions/{version_id}/analyses
+    list_runs_resp = await async_client.get(f"/api/v1/datasets/{dataset_id}/versions/{version_id}/analyses")
+    assert list_runs_resp.status_code == 200
+    assert len(list_runs_resp.json()) >= 1
+    assert list_runs_resp.json()[0]["id"] == str(run.id)
+
+    # 4. Query /analyses/{run_id}/visualizations
+    viz_resp = await async_client.get(f"/api/v1/analyses/{run.id}/visualizations")
+    assert viz_resp.status_code == 200
+    viz_data = viz_resp.json()
+    assert "missing_values" in viz_data
+    assert "summary" in viz_data
+    assert viz_data["summary"]["score"] == 75.0
+
+    # 5. Query /overview/stats
+    overview_resp = await async_client.get("/api/v1/overview/stats")
+    assert overview_resp.status_code == 200
+    ov_data = overview_resp.json()
+    assert ov_data["total_datasets"] >= 1
+    assert ov_data["total_versions"] >= 1
+

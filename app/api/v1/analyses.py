@@ -1,6 +1,6 @@
 """FastAPI routes for triggering analysis, tracking status, and querying quality issues."""
 
-from typing import Optional
+from typing import List, Optional
 import uuid
 from fastapi import APIRouter, Query, status
 
@@ -11,8 +11,10 @@ from app.schemas.analysis import (
     AnalysisResponse,
     AnalysisRunRead,
     HeuristicBreakdownRead,
+    OverviewStatsResponse,
     QualityIssueListResponse,
     QualityIssueRead,
+    VisualizationDataResponse,
 )
 
 router = APIRouter(tags=["Analysis"])
@@ -121,3 +123,52 @@ async def get_analysis_issues_endpoint(
         offset=offset,
         items=issue_items,
     )
+
+
+@router.get(
+    "/datasets/{dataset_id}/versions/{version_id}/analyses",
+    response_model=List[AnalysisRunRead],
+    status_code=status.HTTP_200_OK,
+    summary="List analysis runs for a dataset version",
+    description="Retrieve all historical analysis runs for a specific dataset version.",
+)
+async def list_version_analyses_endpoint(
+    dataset_id: uuid.UUID,
+    version_id: uuid.UUID,
+    db: DBSessionDep,
+    analysis_service: AnalysisServiceDep,
+) -> List[AnalysisRunRead]:
+    runs = await analysis_service.list_analyses_for_version(db=db, version_id=version_id)
+    return [AnalysisRunRead.model_validate(r) for r in runs]
+
+
+@router.get(
+    "/analyses/{run_id}/visualizations",
+    response_model=VisualizationDataResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get server-aggregated analytical visualization series",
+    description="Retrieve bounded, pre-aggregated plotting data for missingness, distributions, cardinality, outliers, and correlations.",
+)
+async def get_analysis_visualizations_endpoint(
+    run_id: uuid.UUID,
+    db: DBSessionDep,
+    analysis_service: AnalysisServiceDep,
+) -> VisualizationDataResponse:
+    data = await analysis_service.get_visualization_data(db=db, run_id=run_id)
+    return VisualizationDataResponse.model_validate(data)
+
+
+@router.get(
+    "/overview/stats",
+    response_model=OverviewStatsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get overview dashboard system statistics",
+    description="Retrieve high-level metrics on datasets, active analysis runs, recent remediations, and issue counts.",
+)
+async def get_overview_stats_endpoint(
+    db: DBSessionDep,
+    analysis_service: AnalysisServiceDep,
+) -> OverviewStatsResponse:
+    stats = await analysis_service.get_overview_stats(db=db)
+    return OverviewStatsResponse.model_validate(stats)
+

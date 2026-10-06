@@ -103,3 +103,29 @@ class HeuristicBreakdownRead(BaseModel):
     disclaimer: str
     itemized_penalties: List[ItemizedPenaltyRead] = Field(default_factory=list)
 
+
+class VisualizationDataResponse(BaseModel):
+    """Server-aggregated, bounded plotting series for analytical visualizations."""
+
+    missing_values: List[Dict[str, Any]] = Field(default_factory=list)
+    cardinality: List[Dict[str, Any]] = Field(default_factory=list)
+    outliers: List[Dict[str, Any]] = Field(default_factory=list)
+    distributions: List[Dict[str, Any]] = Field(default_factory=list)
+    correlations: Dict[str, Any] = Field(default_factory=dict)
+    class_imbalance: Optional[Dict[str, Any]] = None
+    summary: Dict[str, Any] = Field(default_factory=dict)
+
+
+class OverviewStatsResponse(BaseModel):
+    """High-level system statistics for Overview dashboard."""
+
+    total_datasets: int
+    total_versions: int
+    running_analyses_count: int
+    latest_analyses: List[AnalysisRunRead] = Field(default_factory=list)
+    recent_remediations: List[Dict[str, Any]] = Field(default_factory=list)
+    unresolved_critical_issues_count: int
+    unresolved_high_issues_count: int
+    average_readiness_score: Optional[float] = None
+
+

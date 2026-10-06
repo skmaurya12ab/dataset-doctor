@@ -2,7 +2,7 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 5 complete — Deterministic transformation execution, human-approved remediation workflow, immutable dataset versioning (v1 -> v2), automatic re-analysis, and before/after version comparison operational.`
+> **Status:** `Phase 6 complete — Web dashboard, visual analytics, human-in-the-loop remediation workflow, and version comparison UI operational.`
 
 ### Project Roadmap Status
 - **Phase 0 — Foundations & Core Abstractions**: ✅
@@ -11,7 +11,7 @@ Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed
 - **Phase 3 — Advanced Statistical & ML Analysis**: ✅
 - **Phase 4 — AI Provider, Grounded Explanations & Remediation Planning**: ✅
 - **Phase 5 — Deterministic Remediation Execution, Versioning & Comparison**: ✅
-- **Phase 6 — Interactive Quality & Remediation Dashboard**: 🚧 Next
+- **Phase 6 — Interactive Quality & Remediation Dashboard**: ✅
 
 ---
 
