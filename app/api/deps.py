@@ -78,6 +78,34 @@ def get_ai_service(
     return AIService(provider=provider, settings=settings)
 
 
+def get_remediation_executor() -> "RemediationExecutor":
+    """Dependency provider for deterministic RemediationExecutor."""
+    from app.services.remediation_executor import RemediationExecutor
+    return RemediationExecutor()
+
+
+def get_remediation_service(
+    storage: Annotated[FileStorageService, Depends(get_storage_service)],
+    ingestion: Annotated[DatasetIngestionService, Depends(get_ingestion_service)],
+    executor: Annotated["RemediationExecutor", Depends(get_remediation_executor)],
+    analysis_service: Annotated["AnalysisService", Depends(get_analysis_service)],
+) -> "RemediationService":
+    """Dependency provider for RemediationService orchestration."""
+    from app.services.remediation_service import RemediationService
+    return RemediationService(
+        storage=storage,
+        ingestion=ingestion,
+        executor=executor,
+        analysis_service=analysis_service,
+    )
+
+
+def get_comparison_service() -> "ComparisonService":
+    """Dependency provider for ComparisonService."""
+    from app.services.comparison_service import ComparisonService
+    return ComparisonService()
+
+
 async def shutdown_job_runner() -> None:
     """Shutdown job runner on application stop."""
     global _job_runner
@@ -95,5 +123,8 @@ IngestionServiceDep = Annotated[DatasetIngestionService, Depends(get_ingestion_s
 AnalysisServiceDep = Annotated["AnalysisService", Depends(get_analysis_service)]
 LLMProviderDep = Annotated["BaseLLMProvider", Depends(get_llm_provider)]
 AIServiceDep = Annotated["AIService", Depends(get_ai_service)]
+RemediationExecutorDep = Annotated["RemediationExecutor", Depends(get_remediation_executor)]
+RemediationServiceDep = Annotated["RemediationService", Depends(get_remediation_service)]
+ComparisonServiceDep = Annotated["ComparisonService", Depends(get_comparison_service)]
 
 

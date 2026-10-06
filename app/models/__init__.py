@@ -4,6 +4,7 @@ from app.models.base import Base, TimestampMixin
 from app.models.dataset import Dataset, DatasetVersion
 from app.models.analysis import AnalysisRun, QualityIssue, AnalysisStatus
 from app.models.ai import AIReport, FindingExplanationRecord
+from app.models.remediation import RemediationExecution, RemediationExecutionStatus
 
 __all__ = [
     "Base",
@@ -15,6 +16,9 @@ __all__ = [
     "AnalysisStatus",
     "AIReport",
     "FindingExplanationRecord",
+    "RemediationExecution",
+    "RemediationExecutionStatus",
 ]
+
 
 

@@ -24,4 +24,8 @@ v1_router.include_router(analyses_router)
 # Grounded AI interpretation and remediation endpoints
 v1_router.include_router(ai_router)
 
+# Deterministic remediation execution and before/after comparison endpoints
+from app.api.v1.remediations import router as remediations_router
+v1_router.include_router(remediations_router)
+
 
