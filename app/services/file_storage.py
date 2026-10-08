@@ -38,8 +38,8 @@ class FileStorageService:
 
     def sanitize_filename(self, raw_filename: str) -> str:
         """Strip directory components, null bytes, and non-printable characters."""
-        # Extract pure basename, neutralizing path traversal (e.g. ../../)
-        basename = Path(raw_filename).name
+        # Extract pure basename, neutralizing path traversal (e.g. ../../ or ..\..\)
+        basename = Path(raw_filename.replace("\\", "/")).name
         # Keep alphanumeric, dots, underscores, dashes
         clean = re.sub(r"[^a-zA-Z0-9_.-]", "_", basename)
         # Avoid empty or hidden files

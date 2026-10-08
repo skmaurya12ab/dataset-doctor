@@ -1,11 +1,17 @@
 import React, { useMemo } from 'react'
-import Plot from 'react-plotly.js'
-import type { Data, Layout, Config } from 'plotly.js'
+import Plotly from 'plotly.js-dist-min'
+import createPlotlyComponent from 'react-plotly.js/factory'
+
+export const Plot = createPlotlyComponent(Plotly)
+
+export type Data = Plotly.Data
+export type Layout = Plotly.Layout
+export type Config = Plotly.Config
 
 interface PlotlyChartProps {
-  data: Data[]
-  layout?: Partial<Layout>
-  config?: Partial<Config>
+  data: Plotly.Data[]
+  layout?: Partial<Plotly.Layout>
+  config?: Partial<Plotly.Config>
   style?: React.CSSProperties
   className?: string
 }
