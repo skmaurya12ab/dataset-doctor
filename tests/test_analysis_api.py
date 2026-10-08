@@ -267,3 +267,44 @@ async def test_get_analysis_heuristic_endpoint(
     assert ov_data["total_datasets"] >= 1
     assert ov_data["total_versions"] >= 1
 
+
+async def test_regression_analysis_trigger_route_contract_89bf5fc(
+    async_client: AsyncClient,
+    seeded_dataset_version: tuple[uuid.UUID, uuid.UUID],
+):
+    """REGRESSION TEST for commit 89bf5fc:
+    POST /datasets/{dataset_id}/versions/{version_id}/analyze must be 202 Accepted.
+    POST /datasets/{dataset_id}/versions/{version_id}/analyses must remain 405 Method Not Allowed.
+    GET /datasets/{dataset_id}/versions/{version_id}/analyses must remain 200 OK.
+    """
+    dataset_id, version_id = seeded_dataset_version
+
+    # 1. Correct route POST .../analyze -> 202 Accepted
+    trigger_resp = await async_client.post(
+        f"/api/v1/datasets/{dataset_id}/versions/{version_id}/analyze",
+        json={"target_column": "target", "problem_type": "classification"},
+    )
+    assert trigger_resp.status_code == 202
+    assert "analysis_run_id" in trigger_resp.json()
+
+    # 2. Invalid route POST .../analyses -> 405 Method Not Allowed
+    invalid_post_resp = await async_client.post(
+        f"/api/v1/datasets/{dataset_id}/versions/{version_id}/analyses",
+        json={"target_column": "target"},
+    )
+    assert invalid_post_resp.status_code == 405
+
+    # 3. Valid route GET .../analyses -> 200 OK
+    valid_get_resp = await async_client.get(
+        f"/api/v1/datasets/{dataset_id}/versions/{version_id}/analyses",
+    )
+    assert valid_get_resp.status_code == 200
+    assert isinstance(valid_get_resp.json(), list)
+
+
+async def test_visualizations_nonexistent_run_404(async_client: AsyncClient):
+    """Verify visualizations endpoint returns 404 for nonexistent run ID."""
+    fake_run_id = uuid.uuid4()
+    resp = await async_client.get(f"/api/v1/analyses/{fake_run_id}/visualizations")
+    assert resp.status_code == 404
+

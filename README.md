@@ -2,7 +2,7 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 6 complete — Web dashboard, visual analytics, human-in-the-loop remediation workflow, and version comparison UI operational.`
+> **Status:** `Phase 7 complete — Hardening, automated testing across 297 tests, security boundaries, and documentation finalized.`
 
 ### Project Roadmap Status
 - **Phase 0 — Foundations & Core Abstractions**: ✅
@@ -12,6 +12,7 @@ Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed
 - **Phase 4 — AI Provider, Grounded Explanations & Remediation Planning**: ✅
 - **Phase 5 — Deterministic Remediation Execution, Versioning & Comparison**: ✅
 - **Phase 6 — Interactive Quality & Remediation Dashboard**: ✅
+- **Phase 7 — Hardening, Automated Testing & Documentation**: ✅
 
 ---
 
@@ -87,13 +88,21 @@ Dataset Doctor decouples deterministic data analysis from AI interpretation:
 
 ## Technology Stack
 
-- **Runtime**: Python 3.13
+### Backend
+- **Runtime**: Python 3.13 / 3.14
 - **Web Framework**: FastAPI & Uvicorn
 - **Configuration & Validation**: Pydantic v2 & Pydantic-Settings
 - **Database & ORM**: PostgreSQL 16, SQLAlchemy 2.0 (asyncpg), Alembic
 - **Analytics Engine**: pandas, NumPy, SciPy, scikit-learn
 - **Containerization**: Docker & Docker Compose
-- **Testing**: pytest, pytest-asyncio, httpx
+- **Testing**: pytest (268 tests), pytest-asyncio, httpx
+
+### Frontend
+- **Framework**: React 19 + TypeScript + Vite
+- **Routing**: React Router v7
+- **UI Components & Icons**: Lucide React, Custom Dark Modern CSS Design System
+- **Visualization**: Plotly.js (`react-plotly.js/factory` + `plotly.js-dist-min`)
+- **Testing**: Vitest (29 tests), React Testing Library, jsdom
 
 ---
 
@@ -121,7 +130,7 @@ Dataset Doctor decouples deterministic data analysis from AI interpretation:
 
 ## Installation & Setup
 
-### 1. Local Virtual Environment Setup
+### 1. Local Backend Setup
 
 ```bash
 # Clone the repository
@@ -131,15 +140,28 @@ cd dataset-doctor
 # Copy environment configuration
 cp .env.example .env
 
-# Create virtual environment with Python 3.13 (via uv or venv)
-uv venv --python 3.13 .venv
-.\.venv\Scripts\activate
+# Create virtual environment with Python 3.13+
+python3 -m venv .venv
+source .venv/bin/activate
 
 # Install dependencies in editable mode with development tools
-uv pip install -e ".[dev]"
+pip install -e ".[dev]"
+
+# Launch backend server
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 2. Run with Docker Compose
+### 2. Local Frontend Setup
+
+```bash
+cd frontend
+npm install
+
+# Launch frontend development server (Vite)
+npm run dev
+```
+
+### 3. Running with Docker Compose
 
 To spin up PostgreSQL 16 and the FastAPI application in isolated containers:
 
@@ -148,18 +170,29 @@ docker compose up --build
 ```
 
 Access the service:
-- Health check: `http://localhost:8000/health`
+- Frontend Dashboard: `http://localhost:5173`
+- Backend Health: `http://localhost:8000/health`
 - Swagger API Docs: `http://localhost:8000/docs`
 - ReDoc: `http://localhost:8000/redoc`
 
-### 3. Local Development Server
+---
+
+## Automated Testing & Verification
+
+Dataset Doctor features comprehensive automated test suites across both backend and frontend layers:
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### 4. Running Automated Tests
-
-```bash
+# 1. Run full backend test suite (268 tests)
 pytest -v
+
+# 2. Run frontend unit and integration tests (29 tests)
+cd frontend
+npm run test
+
+# 3. Verify frontend TypeScript types and production build
+npm run build
 ```
+
+For detailed architectural and hardening documentation, see:
+- [`docs/phase-7-hardening.md`](file:///docs/phase-7-hardening.md)
+- [`docs/phase-7-completion.md`](file:///docs/phase-7-completion.md)
