@@ -112,7 +112,7 @@ export const api = {
     const response = await apiClient.post<{
       analysis_run_id: string
       status: string
-    }>(`/datasets/${datasetId}/versions/${versionId}/analyses`, payload || {})
+    }>(`/datasets/${datasetId}/versions/${versionId}/analyze`, payload || {})
     return response.data
   },
 
