@@ -1,11 +1,13 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Sidebar } from '../components/Sidebar'
 import { Header } from '../components/Header'
 import { OverviewPage } from '../pages/OverviewPage'
 import { SettingsPage } from '../pages/SettingsPage'
+import { ErrorBoundary } from '../components/ErrorBoundary'
+import { App } from '../App'
 import { api } from '../services/api'
 import type { OverviewStats } from '../types/analysis'
 
@@ -142,5 +144,82 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Security Boundaries')).toBeInTheDocument()
     expect(screen.getByText(/AI Proposes, Human Approves, Python Executes/i)).toBeInTheDocument()
     expect(screen.getByText(/Immutable Versioning/i)).toBeInTheDocument()
+  })
+})
+
+describe('ErrorBoundary & Route Consistency', () => {
+  it('catches uncaught child rendering exceptions and displays error card rather than blank screen', () => {
+    // Suppress React boundary console.error during test
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    const CrashingChild = () => {
+      throw new Error('Test crash in child component')
+    }
+
+    render(
+      <ErrorBoundary>
+        <CrashingChild />
+      </ErrorBoundary>,
+    )
+
+    expect(
+      screen.getByText('Something went wrong while rendering this page'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/Test crash in child component/i)).toBeInTheDocument()
+    expect(screen.getByText(/Reload Page/i)).toBeInTheDocument()
+
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('redirects from /remediations to /remediation preserving query parameters', async () => {
+    vi.mocked(api.getOverviewStats).mockResolvedValue({
+      total_datasets: 0,
+      total_versions: 0,
+      running_analyses_count: 0,
+      latest_analyses: [],
+      recent_remediations: [],
+      unresolved_critical_issues_count: 0,
+      unresolved_high_issues_count: 0,
+      average_readiness_score: null,
+    })
+
+    window.history.pushState({}, '', '/remediations?runId=test-run-123')
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/remediation')
+      expect(window.location.search).toBe('?runId=test-run-123')
+    })
+  })
+
+  it('navigates to Remediation page via sidebar link and renders without blank screen', async () => {
+    vi.mocked(api.getOverviewStats).mockResolvedValue({
+      total_datasets: 0,
+      total_versions: 0,
+      running_analyses_count: 0,
+      latest_analyses: [],
+      recent_remediations: [],
+      unresolved_critical_issues_count: 0,
+      unresolved_high_issues_count: 0,
+      average_readiness_score: null,
+    })
+
+    window.history.pushState({}, '', '/')
+
+    render(<App />)
+
+    await waitFor(() => {
+      expect(screen.getByText('Dataset Doctor')).toBeInTheDocument()
+    })
+
+    const remediationNav = screen.getByRole('link', { name: /Remediation/i })
+    fireEvent.click(remediationNav)
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/remediation')
+      expect(screen.getByText('Dataset Doctor')).toBeInTheDocument()
+      expect(screen.getByText('No Analysis Run Selected')).toBeInTheDocument()
+    })
   })
 })

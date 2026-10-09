@@ -19,6 +19,8 @@ import type {
   RemediationExecution,
   VersionComparison,
 } from '../types/remediation'
+import { normalizeAIReport } from '../utils/aiReport'
+export { normalizeAIReport }
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -197,19 +199,19 @@ export const api = {
   },
 
   async getAIPlan(runId: string): Promise<AIReport> {
-    const response = await apiClient.get<AIReport>(`/analyses/${runId}/ai-plan`)
-    return response.data
+    const response = await apiClient.get<any>(`/analyses/${runId}/ai-plan`)
+    return normalizeAIReport(response.data)
   },
 
   async generateAIPlan(
     runId: string,
     forceRegenerate = false,
   ): Promise<AIReport> {
-    const response = await apiClient.post<AIReport>(
+    const response = await apiClient.post<any>(
       `/analyses/${runId}/generate-ai-plan?force_regenerate=${forceRegenerate}`,
       {},
     )
-    return response.data
+    return normalizeAIReport(response.data)
   },
 
   // --- Remediation & Comparison ---

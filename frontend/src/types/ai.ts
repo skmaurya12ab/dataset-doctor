@@ -17,7 +17,8 @@ export interface TransformationSpec {
 }
 
 export interface RiskAssessmentItem {
-  risk_type: string
+  risk_type?: string
+  category?: string
   severity: IssueSeverity
   summary: string
   ml_impact: string
@@ -57,6 +58,7 @@ export interface AIReportContent {
   executive_summary: string
   risk_assessment: RiskAssessmentItem[]
   prioritized_remediation_steps: RemediationStep[]
+  remediation_plan?: RemediationStep[]
   ml_preparation_plan: string[]
   transformation_specs: TransformationSpec[]
   generated_python_code?: string | null
@@ -68,7 +70,14 @@ export interface AIReport {
   provider: string
   model: string
   prompt_version: string
-  report_type: string
+  report_type?: string
   content: AIReportContent
+  executive_summary?: string
+  risk_assessment?: RiskAssessmentItem[]
+  remediation_plan?: RemediationStep[]
+  transformation_specs?: TransformationSpec[]
+  ml_preparation_plan?: string[]
+  generated_python_code?: string | null
+  cached?: boolean
   created_at: string
 }

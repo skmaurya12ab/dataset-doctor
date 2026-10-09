@@ -1,5 +1,5 @@
 import React from 'react'
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { OverviewPage } from './pages/OverviewPage'
 import { DatasetsPage } from './pages/DatasetsPage'
@@ -9,6 +9,11 @@ import { AnalysisPage } from './pages/AnalysisPage'
 import { RemediationPage } from './pages/RemediationPage'
 import { ComparisonPage } from './pages/ComparisonPage'
 import { SettingsPage } from './pages/SettingsPage'
+
+const RemediationsRedirect: React.FC = () => {
+  const location = useLocation()
+  return <Navigate to={{ pathname: '/remediation', search: location.search }} replace />
+}
 
 export const App: React.FC = () => {
   return (
@@ -24,6 +29,7 @@ export const App: React.FC = () => {
           />
           <Route path="analysis" element={<AnalysisPage />} />
           <Route path="remediation" element={<RemediationPage />} />
+          <Route path="remediations" element={<RemediationsRedirect />} />
           <Route path="versions" element={<ComparisonPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

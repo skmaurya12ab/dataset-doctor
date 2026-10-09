@@ -20,6 +20,11 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
   onOpenApprovalModal,
   isExecutionDisabled = false,
 }) => {
+  const specs = plan?.transformation_specs ?? []
+  const steps = plan?.prioritized_remediation_steps ?? plan?.remediation_plan ?? []
+  const risks = plan?.risk_assessment ?? []
+  const summary = plan?.executive_summary ?? 'No executive summary provided.'
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
       {/* Executive Summary */}
@@ -33,7 +38,7 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
             <button
               className="btn btn-primary"
               onClick={onOpenApprovalModal}
-              disabled={isExecutionDisabled || plan.transformation_specs.length === 0}
+              disabled={isExecutionDisabled || specs.length === 0}
             >
               <span>Review & Approve Plan</span>
               <ArrowRight size={14} />
@@ -41,7 +46,7 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
           )}
         </div>
         <p style={{ fontSize: '14px', color: 'var(--text-primary)', lineHeight: 1.6 }}>
-          {plan.executive_summary}
+          {summary}
         </p>
       </div>
 
@@ -51,7 +56,7 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <Layers size={16} color="var(--accent-primary)" />
             <span className="card-title">
-              Proposed Transformations ({plan.transformation_specs.length})
+              Proposed Transformations ({specs.length})
             </span>
           </div>
           <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
@@ -59,13 +64,13 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
           </span>
         </div>
 
-        {plan.transformation_specs.length === 0 ? (
+        {specs.length === 0 ? (
           <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13px' }}>
             No automated transformations proposed. Manual data curation or feature engineering recommended.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            {plan.transformation_specs.map((spec: TransformationSpec, idx: number) => {
+            {specs.map((spec: TransformationSpec, idx: number) => {
               const targetCol = spec.column || (spec.columns ? spec.columns.join(', ') : 'All columns')
               return (
                 <div
@@ -141,7 +146,7 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
             <span className="card-title">Prioritized Remediation Roadmap</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {plan.prioritized_remediation_steps.map((step, idx) => (
+            {steps.map((step, idx) => (
               <div
                 key={idx}
                 style={{
@@ -168,7 +173,7 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
             <span className="card-title">Risk Assessment</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {plan.risk_assessment.map((risk, idx) => (
+            {risks.map((risk, idx) => (
               <div
                 key={idx}
                 style={{
@@ -179,8 +184,8 @@ export const RemediationPlanView: React.FC<RemediationPlanViewProps> = ({
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{risk.risk_type}</span>
-                  <SeverityBadge severity={risk.severity} showIcon={false} />
+                  <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{risk.risk_type || risk.category || 'Identified Risk'}</span>
+                  <SeverityBadge severity={risk.severity || 'INFO'} showIcon={false} />
                 </div>
                 <div style={{ color: 'var(--text-secondary)', marginBottom: '4px' }}>{risk.summary}</div>
                 <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Impact: {risk.ml_impact}</div>

@@ -11,6 +11,7 @@ import {
   RotateCw,
 } from 'lucide-react'
 import { api } from '../services/api'
+import { normalizeAIReport } from '../utils/aiReport'
 import type { AIReport } from '../types/ai'
 import type { RemediationExecution } from '../types/remediation'
 import type { AnalysisRun } from '../types/analysis'
@@ -118,6 +119,31 @@ export const RemediationPage: React.FC = () => {
 
   if (isLoading) return <LoadingSpinner message="Loading remediation workspace..." />
 
+  if (error && !analysisRun) {
+    return (
+      <div
+        className="card"
+        style={{
+          borderColor: 'var(--severity-critical-border)',
+          backgroundColor: 'var(--severity-critical-bg)',
+          color: 'var(--severity-critical)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '12px',
+          padding: '24px',
+        }}
+      >
+        <AlertCircle size={20} />
+        <div>
+          <div style={{ fontWeight: 600, fontSize: '14px', marginBottom: '4px' }}>
+            Failed to load analysis for remediation
+          </div>
+          <div style={{ fontSize: '13px' }}>{error}</div>
+        </div>
+      </div>
+    )
+  }
+
   if (!analysisRun) {
     return (
       <div className="card" style={{ textAlign: 'center', padding: '36px' }}>
@@ -133,6 +159,11 @@ export const RemediationPage: React.FC = () => {
       </div>
     )
   }
+
+  const transformationSpecs =
+    aiReport?.content?.transformation_specs ?? aiReport?.transformation_specs ?? []
+  const planContent =
+    aiReport?.content ?? (aiReport ? normalizeAIReport(aiReport).content : null)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -177,7 +208,7 @@ export const RemediationPage: React.FC = () => {
             <button
               className="btn btn-primary"
               onClick={() => setIsApprovalOpen(true)}
-              disabled={isApplying || aiReport.content.transformation_specs.length === 0}
+              disabled={isApplying || transformationSpecs.length === 0}
             >
               <Play size={14} />
               <span>Review & Approve Plan</span>
@@ -306,9 +337,9 @@ export const RemediationPage: React.FC = () => {
       {/* Main Plan View */}
       {isGeneratingPlan ? (
         <LoadingSpinner message="Synthesizing advisory remediation plan with LLM provider..." />
-      ) : aiReport ? (
+      ) : aiReport && planContent ? (
         <RemediationPlanView
-          plan={aiReport.content}
+          plan={planContent}
           onOpenApprovalModal={() => setIsApprovalOpen(true)}
           isExecutionDisabled={isApplying || Boolean(execution && execution.status === 'COMPLETED')}
         />
@@ -346,7 +377,7 @@ export const RemediationPage: React.FC = () => {
           isOpen={isApprovalOpen}
           onClose={() => setIsApprovalOpen(false)}
           onApprove={handleApproveAndApply}
-          transformationSpecs={aiReport.content.transformation_specs}
+          transformationSpecs={transformationSpecs}
           isApplying={isApplying}
         />
       )}

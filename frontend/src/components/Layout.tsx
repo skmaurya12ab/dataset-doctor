@@ -3,6 +3,7 @@ import { Outlet, useNavigate } from 'react-router-dom'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { UploadModal } from './UploadModal'
+import { ErrorBoundary } from './ErrorBoundary'
 import type { DatasetUploadResponse } from '../types/dataset'
 
 export const Layout: React.FC = () => {
@@ -19,7 +20,9 @@ export const Layout: React.FC = () => {
       <div className="main-wrapper">
         <Header onOpenUpload={() => setIsUploadOpen(true)} />
         <main className="page-content" role="main">
-          <Outlet context={{ openUpload: () => setIsUploadOpen(true) }} />
+          <ErrorBoundary>
+            <Outlet context={{ openUpload: () => setIsUploadOpen(true) }} />
+          </ErrorBoundary>
         </main>
       </div>
 
