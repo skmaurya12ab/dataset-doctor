@@ -7,23 +7,26 @@ import {
   ShieldCheck,
   TrendingUp,
 } from 'lucide-react'
-import type { VersionComparison } from '../types/remediation'
+import type { VersionComparison, IssueComparisonItem } from '../types/remediation'
 import { MetricCard } from './MetricCard'
 import { SeverityBadge } from './SeverityBadge'
+import { normalizeVersionComparison } from '../utils/versionComparison'
 
 interface VersionComparisonViewProps {
   comparison: VersionComparison
 }
 
 export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
-  comparison,
+  comparison: rawComparison,
 }) => {
+  const comparison = normalizeVersionComparison(rawComparison)
   const [filterStatus, setFilterStatus] = useState<string>('ALL')
 
   const { before, after, dataset_metrics, quality, heuristic } = comparison
-  const summary = quality.summary
+  const summary = quality.summary!
+  const issuesList: IssueComparisonItem[] = quality.issues || quality.items || []
 
-  const filteredIssues = quality.issues.filter((item) => {
+  const filteredIssues = issuesList.filter((item) => {
     if (filterStatus === 'ALL') return true
     return item.status === filterStatus
   })
@@ -31,6 +34,7 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
   // Heuristic color
   const heuristicDelta = heuristic.delta ?? 0
   const isPositiveImprovement = heuristicDelta > 0
+
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
@@ -85,6 +89,28 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
         </div>
       </div>
 
+      {/* Notice if either version lacks an analysis run */}
+      {(!before.analysis_run_id || !after.analysis_run_id) && (
+        <div
+          className="card"
+          style={{
+            backgroundColor: 'var(--severity-low-bg)',
+            borderColor: 'var(--severity-low-border)',
+            color: 'var(--text-secondary)',
+            fontSize: '12px',
+            padding: '12px 16px',
+          }}
+        >
+          Notice:{' '}
+          {!before.analysis_run_id && !after.analysis_run_id
+            ? 'Neither version has'
+            : !before.analysis_run_id
+            ? 'Version 1 does not have'
+            : 'Version 2 does not have'}{' '}
+          a completed analysis run. Only dataset shape metrics are compared; quality issues and heuristic score require completed analyses.
+        </div>
+      )}
+
       {/* Readiness Heuristic Delta Highlight */}
       <div
         className="card"
@@ -118,7 +144,9 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
               BEFORE (v{before.version_number})
             </div>
             <div className="font-mono" style={{ fontSize: '32px', fontWeight: 700, color: 'var(--text-secondary)' }}>
-              {heuristic.before_score !== null ? Math.round(heuristic.before_score!) : '—'}
+              {heuristic.before_score !== null && heuristic.before_score !== undefined
+                ? Math.round(heuristic.before_score)
+                : '—'}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600 }}>
               {heuristic.before_rating || 'UNRATED'}
@@ -153,7 +181,9 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
                 color: isPositiveImprovement ? 'var(--status-success)' : 'var(--text-primary)',
               }}
             >
-              {heuristic.after_score !== null ? Math.round(heuristic.after_score!) : '—'}
+              {heuristic.after_score !== null && heuristic.after_score !== undefined
+                ? Math.round(heuristic.after_score)
+                : '—'}
             </div>
             <div style={{ fontSize: '12px', color: 'var(--status-success)', fontWeight: 600 }}>
               {heuristic.after_rating || 'UNRATED'}
@@ -179,17 +209,17 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
       <div className="grid-cols-4">
         <MetricCard
           label="Total Rows"
-          value={dataset_metrics.row_count?.after?.toLocaleString() ?? '—'}
-          delta={dataset_metrics.row_count?.delta}
+          value={(dataset_metrics.row_count ?? dataset_metrics.rows)?.after?.toLocaleString() ?? '—'}
+          delta={(dataset_metrics.row_count ?? dataset_metrics.rows)?.delta}
           deltaLabel="rows"
-          subtext={`Before: ${dataset_metrics.row_count?.before?.toLocaleString() ?? '—'}`}
+          subtext={`Before: ${(dataset_metrics.row_count ?? dataset_metrics.rows)?.before?.toLocaleString() ?? '—'}`}
         />
         <MetricCard
           label="Columns"
-          value={dataset_metrics.column_count?.after ?? '—'}
-          delta={dataset_metrics.column_count?.delta}
+          value={(dataset_metrics.column_count ?? dataset_metrics.columns)?.after ?? '—'}
+          delta={(dataset_metrics.column_count ?? dataset_metrics.columns)?.delta}
           deltaLabel="cols"
-          subtext={`Before: ${dataset_metrics.column_count?.before ?? '—'}`}
+          subtext={`Before: ${(dataset_metrics.column_count ?? dataset_metrics.columns)?.before ?? '—'}`}
         />
         <MetricCard
           label="Missing Values"
@@ -206,6 +236,7 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
           subtext={`Before: ${dataset_metrics.duplicate_rows?.before ?? '—'}`}
         />
       </div>
+
 
       {/* Issue Lifecycle Breakdown */}
       <div className="card">
@@ -372,7 +403,7 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
                     </td>
                     <td>
                       <span className="font-mono" style={{ fontSize: '12px' }}>
-                        {item.module.replace(/_analyzer$/, '')}
+                        {(item.module || '').replace(/_analyzer$/, '') || 'general'}
                       </span>
                     </td>
                     <td>
@@ -401,9 +432,17 @@ export const VersionComparisonView: React.FC<VersionComparisonViewProps> = ({
                     </td>
                     <td>
                       <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                        {item.details?.note ? String(item.details.note) : item.category}
+                        {String(
+                          item.details?.resolution ||
+                          item.details?.change ||
+                          item.details?.issue ||
+                          item.details?.note ||
+                          item.category ||
+                          ''
+                        )}
                       </span>
                     </td>
+
                   </tr>
                 ))
               )}

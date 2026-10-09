@@ -25,13 +25,34 @@ export const ComparisonPage: React.FC = () => {
 
   // 1. Load datasets list
   useEffect(() => {
-    api.listDatasets().then((items) => {
+    api.listDatasets().then(async (items) => {
       setDatasets(items)
-      if (!selectedDatasetId && items.length > 0) {
-        setSelectedDatasetId(items[0].dataset_id)
+
+      if (datasetIdParam) {
+        setSelectedDatasetId(datasetIdParam)
+      } else if (v1Param || v2Param) {
+        let matchedDatasetId = ''
+        for (const item of items) {
+          try {
+            const ds = await api.getDataset(item.dataset_id)
+            if (ds.versions.some((v) => v.id === v1Param || v.id === v2Param)) {
+              matchedDatasetId = item.dataset_id
+              break
+            }
+          } catch {
+            // ignore
+          }
+        }
+        setSelectedDatasetId(matchedDatasetId || (items[0]?.dataset_id ?? ''))
+      } else {
+        setSelectedDatasetId((prev) => {
+          if (prev) return prev
+          const multi = items.find((d) => d.latest_version_number >= 2)
+          return multi ? multi.dataset_id : (items[0]?.dataset_id ?? '')
+        })
       }
     })
-  }, [selectedDatasetId])
+  }, [datasetIdParam, v1Param, v2Param])
 
   // 2. Load dataset details with versions whenever selectedDatasetId changes
   useEffect(() => {
@@ -39,11 +60,19 @@ export const ComparisonPage: React.FC = () => {
     api.getDataset(selectedDatasetId).then((ds) => {
       setSelectedDataset(ds)
       if (ds.versions && ds.versions.length >= 2) {
-        if (!selectedV1) setSelectedV1(ds.versions[0].id)
-        if (!selectedV2) setSelectedV2(ds.versions[ds.versions.length - 1].id)
+        const hasV1 = v1Param && ds.versions.some((v) => v.id === v1Param)
+        const hasV2 = v2Param && ds.versions.some((v) => v.id === v2Param)
+
+        setSelectedV1((prev) => (hasV1 ? v1Param! : prev || ds.versions[0].id))
+        setSelectedV2((prev) => (hasV2 ? v2Param! : prev || ds.versions[ds.versions.length - 1].id))
+      } else {
+        setSelectedV1('')
+        setSelectedV2('')
       }
     })
-  }, [selectedDatasetId, selectedV1, selectedV2])
+  }, [selectedDatasetId, v1Param, v2Param])
+
+
 
   // 3. Load comparison
   const loadComparison = useCallback(async (dsId: string, v1: string, v2: string) => {
@@ -68,6 +97,8 @@ export const ComparisonPage: React.FC = () => {
       loadComparison(selectedDatasetId, selectedV1, selectedV2)
     }
   }, [selectedDatasetId, selectedV1, selectedV2, loadComparison])
+
+
 
   const handleCompareSubmit = (e: React.FormEvent) => {
     e.preventDefault()

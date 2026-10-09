@@ -20,7 +20,8 @@ import type {
   VersionComparison,
 } from '../types/remediation'
 import { normalizeAIReport } from '../utils/aiReport'
-export { normalizeAIReport }
+import { normalizeVersionComparison } from '../utils/versionComparison'
+export { normalizeAIReport, normalizeVersionComparison }
 
 const apiClient = axios.create({
   baseURL: '/api/v1',
@@ -256,8 +257,9 @@ export const api = {
         params: { v1, v2 },
       },
     )
-    return response.data
+    return normalizeVersionComparison(response.data)
   },
+
 
   async pollRemediationExecution(
     executionId: string,

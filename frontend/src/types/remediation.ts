@@ -76,39 +76,61 @@ export interface RemediationExecution {
   completed_at?: string | null
 }
 
+export interface QualityComparisonSummary {
+  total_before?: number
+  total_after?: number
+  resolved_count: number
+  changed_count: number
+  unchanged_count: number
+  new_count: number
+  critical_before?: number
+  critical_after?: number
+}
+
+export interface QualityComparison {
+  // Direct backend response keys
+  issues_resolved?: number
+  issues_changed?: number
+  issues_unchanged?: number
+  new_issues?: number
+  items?: IssueComparisonItem[]
+
+  // Frontend normalized aliases
+  summary?: QualityComparisonSummary
+  issues?: IssueComparisonItem[]
+  [key: string]: unknown
+}
+
 export interface VersionComparison {
   dataset_id: string
   before: {
     version_id: string
     version_number: number
     analysis_run_id?: string | null
+    file_name?: string
+    created_at?: string
     [key: string]: unknown
   }
   after: {
     version_id: string
     version_number: number
     analysis_run_id?: string | null
+    file_name?: string
+    created_at?: string
     [key: string]: unknown
   }
   dataset_metrics: {
-    row_count: MetricDelta<number>
-    column_count: MetricDelta<number>
-    missing_percentage: MetricDelta<number>
-    duplicate_rows: MetricDelta<number>
-    [key: string]: MetricDelta<number | string>
+    rows?: MetricDelta<number>
+    row_count?: MetricDelta<number>
+    columns?: MetricDelta<number>
+    column_count?: MetricDelta<number>
+    missing_cells?: MetricDelta<number>
+    missing_percentage?: MetricDelta<number>
+    duplicate_rows?: MetricDelta<number>
+    total_issues?: MetricDelta<number>
+    critical_issues?: MetricDelta<number>
+    [key: string]: MetricDelta<number | string> | undefined
   }
-  quality: {
-    summary: {
-      total_before: number
-      total_after: number
-      resolved_count: number
-      changed_count: number
-      unchanged_count: number
-      new_count: number
-      critical_before: number
-      critical_after: number
-    }
-    issues: IssueComparisonItem[]
-  }
+  quality: QualityComparison
   heuristic: HeuristicComparison
 }

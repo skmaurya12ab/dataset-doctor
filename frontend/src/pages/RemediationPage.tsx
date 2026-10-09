@@ -323,6 +323,8 @@ export const RemediationPage: React.FC = () => {
                       `/versions?v1=${execution.source_dataset_version_id}&v2=${execution.result_dataset_version_id}`,
                     )
                   }
+
+
                 >
                   <GitCompare size={14} />
                   <span>Compare Before & After</span>
