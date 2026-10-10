@@ -45,6 +45,14 @@ describe('Application Shell - Navigation & Header', () => {
 describe('Dashboard - OverviewPage States', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(api.getCurrentUser).mockResolvedValue({
+      id: '00000000-0000-0000-0000-000000000001',
+      email: 'testuser@example.com',
+      is_active: true,
+      is_verified: true,
+      role: 'user',
+      created_at: new Date().toISOString(),
+    })
   })
 
   it('renders loading spinner initially while fetching telemetry', () => {
@@ -148,6 +156,16 @@ describe('SettingsPage', () => {
 })
 
 describe('ErrorBoundary & Route Consistency', () => {
+  beforeEach(() => {
+    vi.mocked(api.getCurrentUser).mockResolvedValue({
+      id: '00000000-0000-0000-0000-000000000001',
+      email: 'testuser@example.com',
+      is_active: true,
+      is_verified: true,
+      role: 'user',
+      created_at: new Date().toISOString(),
+    })
+  })
   it('catches uncaught child rendering exceptions and displays error card rather than blank screen', () => {
     // Suppress React boundary console.error during test
     const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})

@@ -7,9 +7,10 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, sta
 from sqlalchemy import desc, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DBSessionDep, IngestionServiceDep, StorageServiceDep
+from app.api.deps import CurrentUserDep, DBSessionDep, IngestionServiceDep, StorageServiceDep
 from app.core.exceptions import EntityNotFoundException, MalformedFileException
 from app.core.logging import get_logger
+from app.core.rate_limit import rate_limiter
 from app.models.dataset import Dataset, DatasetVersion
 from app.schemas.dataset import (
     DatasetListItem,
@@ -28,6 +29,7 @@ async def upload_dataset(
     db: DBSessionDep,
     storage: StorageServiceDep,
     ingestion: IngestionServiceDep,
+    current_user: CurrentUserDep,
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
@@ -37,8 +39,10 @@ async def upload_dataset(
     """Upload a tabular dataset (CSV, XLSX, JSON, Parquet).
     
     Validates file integrity, saves original upload, converts canonically to Parquet,
-    extracts schema metadata, and persists immutable version records.
+    extracts schema metadata, persists immutable version records, and associates ownership.
     """
+    rate_limiter.enforce(f"upload:{current_user.id}", max_requests=20, window_seconds=60, action_name="Dataset upload")
+
     if not file or not file.filename:
         raise MalformedFileException("No file provided in upload request.")
 
@@ -50,11 +54,11 @@ async def upload_dataset(
     target_dataset: Optional[Dataset] = None
 
     if dataset_id:
-        # Uploading a new version to an existing dataset
+        # Uploading a new version to an existing dataset - verify ownership
         res = await db.execute(
             select(Dataset)
             .options(selectinload(Dataset.versions))
-            .where(Dataset.id == dataset_id)
+            .where(Dataset.id == dataset_id, Dataset.owner_id == current_user.id)
         )
         target_dataset = res.scalar_one_or_none()
         if not target_dataset:
@@ -125,6 +129,7 @@ async def upload_dataset(
             id=resolved_dataset_id,
             name=dataset_name,
             description=description,
+            owner_id=current_user.id,
         )
         db.add(target_dataset)
         await db.flush()
@@ -147,12 +152,13 @@ async def upload_dataset(
     await db.commit()
 
     logger.info(
-        "Successfully registered dataset %s ('%s') v%d with %d rows and %d cols",
+        "Successfully registered dataset %s ('%s') v%d with %d rows and %d cols for user %s",
         resolved_dataset_id,
         dataset_name,
         target_version_number,
         row_count,
         column_count,
+        current_user.id,
     )
 
     return DatasetUploadResponse(
@@ -168,11 +174,15 @@ async def upload_dataset(
 
 
 @router.get("", response_model=List[DatasetListItem])
-async def list_datasets(db: DBSessionDep) -> List[DatasetListItem]:
-    """Retrieve summary listing of all datasets and their latest version information."""
+async def list_datasets(
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> List[DatasetListItem]:
+    """Retrieve summary listing of all datasets and their latest version information for current user."""
     stmt = (
         select(Dataset)
         .options(selectinload(Dataset.versions))
+        .where(Dataset.owner_id == current_user.id)
         .order_by(desc(Dataset.updated_at))
     )
     result = await db.execute(stmt)
@@ -200,12 +210,16 @@ async def list_datasets(db: DBSessionDep) -> List[DatasetListItem]:
 
 
 @router.get("/{dataset_id}", response_model=DatasetRead)
-async def get_dataset_detail(dataset_id: uuid.UUID, db: DBSessionDep) -> DatasetRead:
+async def get_dataset_detail(
+    dataset_id: uuid.UUID,
+    db: DBSessionDep,
+    current_user: CurrentUserDep,
+) -> DatasetRead:
     """Retrieve detailed dataset information including all historical versions."""
     stmt = (
         select(Dataset)
         .options(selectinload(Dataset.versions))
-        .where(Dataset.id == dataset_id)
+        .where(Dataset.id == dataset_id, Dataset.owner_id == current_user.id)
     )
     result = await db.execute(stmt)
     dataset = result.scalar_one_or_none()
@@ -221,13 +235,19 @@ async def get_dataset_version_preview(
     version_num: int,
     db: DBSessionDep,
     storage: StorageServiceDep,
+    current_user: CurrentUserDep,
     limit: int = Query(default=20, ge=1, le=100, description="Maximum rows to preview (1-100)"),
     offset: int = Query(default=0, ge=0, description="Offset row index"),
 ) -> DatasetPreviewResponse:
     """Retrieve a strictly bounded row-level preview of a dataset version."""
-    stmt = select(DatasetVersion).where(
-        DatasetVersion.dataset_id == dataset_id,
-        DatasetVersion.version_number == version_num,
+    stmt = (
+        select(DatasetVersion)
+        .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+        .where(
+            DatasetVersion.dataset_id == dataset_id,
+            DatasetVersion.version_number == version_num,
+            Dataset.owner_id == current_user.id,
+        )
     )
     result = await db.execute(stmt)
     version = result.scalar_one_or_none()

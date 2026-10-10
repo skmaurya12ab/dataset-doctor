@@ -429,28 +429,124 @@ class AnalysisService:
             },
         }
 
-    async def get_overview_stats(self, db: AsyncSession) -> Dict[str, Any]:
-        """Aggregate high-level overview metrics across all datasets, runs, and defects."""
+    async def get_overview_stats(self, db: AsyncSession, user_id: Optional[uuid.UUID] = None) -> Dict[str, Any]:
+        """Aggregate high-level overview metrics across datasets, runs, and defects scoped to user if provided."""
         from app.models.dataset import Dataset, DatasetVersion
         from app.models.remediation import RemediationExecution
 
-        total_datasets = (await db.execute(select(func.count(Dataset.id)))).scalar() or 0
-        total_versions = (await db.execute(select(func.count(DatasetVersion.id)))).scalar() or 0
-        running_analyses = (
-            await db.execute(
-                select(func.count(AnalysisRun.id)).where(AnalysisRun.status == AnalysisStatus.RUNNING.value)
+        if user_id is not None:
+            total_datasets = (
+                await db.execute(select(func.count(Dataset.id)).where(Dataset.owner_id == user_id))
+            ).scalar() or 0
+
+            total_versions = (
+                await db.execute(
+                    select(func.count(DatasetVersion.id))
+                    .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                    .where(Dataset.owner_id == user_id)
+                )
+            ).scalar() or 0
+
+            running_analyses = (
+                await db.execute(
+                    select(func.count(AnalysisRun.id))
+                    .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                    .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                    .where(AnalysisRun.status == AnalysisStatus.RUNNING.value, Dataset.owner_id == user_id)
+                )
+            ).scalar() or 0
+
+            latest_runs_res = await db.execute(
+                select(AnalysisRun)
+                .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                .where(Dataset.owner_id == user_id)
+                .order_by(AnalysisRun.created_at.desc())
+                .limit(5)
             )
-        ).scalar() or 0
+            latest_runs = list(latest_runs_res.scalars().all())
 
-        latest_runs_res = await db.execute(
-            select(AnalysisRun).order_by(AnalysisRun.created_at.desc()).limit(5)
-        )
-        latest_runs = list(latest_runs_res.scalars().all())
+            latest_rems_res = await db.execute(
+                select(RemediationExecution)
+                .join(AnalysisRun, RemediationExecution.analysis_run_id == AnalysisRun.id)
+                .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                .where(Dataset.owner_id == user_id)
+                .order_by(RemediationExecution.created_at.desc())
+                .limit(5)
+            )
+            latest_rems = list(latest_rems_res.scalars().all())
 
-        latest_rems_res = await db.execute(
-            select(RemediationExecution).order_by(RemediationExecution.created_at.desc()).limit(5)
-        )
-        latest_rems = list(latest_rems_res.scalars().all())
+            crit_issues = (
+                await db.execute(
+                    select(func.count(QualityIssue.id))
+                    .join(AnalysisRun, QualityIssue.analysis_run_id == AnalysisRun.id)
+                    .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                    .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                    .where(QualityIssue.severity == "CRITICAL", Dataset.owner_id == user_id)
+                )
+            ).scalar() or 0
+
+            high_issues = (
+                await db.execute(
+                    select(func.count(QualityIssue.id))
+                    .join(AnalysisRun, QualityIssue.analysis_run_id == AnalysisRun.id)
+                    .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                    .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                    .where(QualityIssue.severity == "HIGH", Dataset.owner_id == user_id)
+                )
+            ).scalar() or 0
+
+            avg_score = (
+                await db.execute(
+                    select(func.avg(AnalysisRun.ml_readiness_score))
+                    .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+                    .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+                    .where(
+                        AnalysisRun.status == AnalysisStatus.COMPLETED.value,
+                        Dataset.owner_id == user_id,
+                    )
+                )
+            ).scalar()
+        else:
+            total_datasets = (await db.execute(select(func.count(Dataset.id)))).scalar() or 0
+            total_versions = (await db.execute(select(func.count(DatasetVersion.id)))).scalar() or 0
+            running_analyses = (
+                await db.execute(
+                    select(func.count(AnalysisRun.id)).where(AnalysisRun.status == AnalysisStatus.RUNNING.value)
+                )
+            ).scalar() or 0
+
+            latest_runs_res = await db.execute(
+                select(AnalysisRun).order_by(AnalysisRun.created_at.desc()).limit(5)
+            )
+            latest_runs = list(latest_runs_res.scalars().all())
+
+            latest_rems_res = await db.execute(
+                select(RemediationExecution).order_by(RemediationExecution.created_at.desc()).limit(5)
+            )
+            latest_rems = list(latest_rems_res.scalars().all())
+
+            crit_issues = (
+                await db.execute(
+                    select(func.count(QualityIssue.id)).where(QualityIssue.severity == "CRITICAL")
+                )
+            ).scalar() or 0
+
+            high_issues = (
+                await db.execute(
+                    select(func.count(QualityIssue.id)).where(QualityIssue.severity == "HIGH")
+                )
+            ).scalar() or 0
+
+            avg_score = (
+                await db.execute(
+                    select(func.avg(AnalysisRun.ml_readiness_score)).where(
+                        AnalysisRun.status == AnalysisStatus.COMPLETED.value
+                    )
+                )
+            ).scalar()
+
         latest_rems_dicts = [
             {
                 "id": str(r.id),
@@ -462,26 +558,6 @@ class AnalysisService:
             }
             for r in latest_rems
         ]
-
-        crit_issues = (
-            await db.execute(
-                select(func.count(QualityIssue.id)).where(QualityIssue.severity == "CRITICAL")
-            )
-        ).scalar() or 0
-
-        high_issues = (
-            await db.execute(
-                select(func.count(QualityIssue.id)).where(QualityIssue.severity == "HIGH")
-            )
-        ).scalar() or 0
-
-        avg_score = (
-            await db.execute(
-                select(func.avg(AnalysisRun.ml_readiness_score)).where(
-                    AnalysisRun.status == AnalysisStatus.COMPLETED.value
-                )
-            )
-        ).scalar()
 
         return {
             "total_datasets": total_datasets,

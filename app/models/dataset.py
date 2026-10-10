@@ -1,7 +1,5 @@
-"""SQLAlchemy models for Datasets and immutable DatasetVersions."""
-
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 import uuid
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
@@ -9,6 +7,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
 
 from app.models.base import Base, TimestampMixin
+
+if TYPE_CHECKING:
+    from app.models.user import User
 
 # Use JSONB for PostgreSQL when available, fallback to JSON for SQLite/other dialects
 JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
@@ -32,8 +33,18 @@ class Dataset(Base, TimestampMixin):
         Text,
         nullable=True,
     )
+    owner_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     # Relationships
+    owner: Mapped[Optional["User"]] = relationship(
+        "User",
+        back_populates="datasets",
+        foreign_keys=[owner_id],
+    )
     versions: Mapped[List["DatasetVersion"]] = relationship(
         "DatasetVersion",
         back_populates="dataset",

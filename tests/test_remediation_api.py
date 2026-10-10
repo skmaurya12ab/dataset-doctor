@@ -18,7 +18,11 @@ from app.services.file_storage import FileStorageService
 @pytest.fixture
 async def api_remediation_env(test_db_session: AsyncSession, test_storage: FileStorageService):
     """Fixture providing dataset, v1 parquet, analysis run, issues, and AI report for HTTP testing."""
-    dataset = Dataset(id=uuid.uuid4(), name="API Remediation Dataset")
+    dataset = Dataset(
+        id=uuid.uuid4(),
+        name="API Remediation Dataset",
+        owner_id=uuid.UUID("00000000-0000-0000-0000-000000000001"),
+    )
     test_db_session.add(dataset)
 
     # v1 DataFrame with duplicates and missing value

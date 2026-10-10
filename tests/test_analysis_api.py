@@ -20,7 +20,7 @@ async def seeded_dataset_version(
     """Create a real dataset and version with Parquet file."""
     import pandas as pd
 
-    ds = Dataset(name="API Test Dataset")
+    ds = Dataset(name="API Test Dataset", owner_id=uuid.UUID("00000000-0000-0000-0000-000000000001"))
     test_db_session.add(ds)
     await test_db_session.commit()
     await test_db_session.refresh(ds)

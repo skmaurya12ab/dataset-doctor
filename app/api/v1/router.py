@@ -15,6 +15,10 @@ async def v1_health_check() -> HealthResponse:
     return HealthResponse(status="ok")
 
 
+# Authentication and identity management endpoints
+from app.api.v1.auth import router as auth_router
+v1_router.include_router(auth_router)
+
 # Datasets management endpoints
 v1_router.include_router(datasets_router)
 

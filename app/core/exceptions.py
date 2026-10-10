@@ -87,3 +87,15 @@ class InvalidTransformationException(DatasetDoctorException):
         super().__init__(f"Invalid Transformation: {details}", status_code=400)
 
 
+class AuthenticationException(DatasetDoctorException):
+    """Raised when an unauthenticated or invalid session/credential request occurs."""
+
+    def __init__(self, details: str = "Authentication required"):
+        super().__init__(details, status_code=401)
+
+
+class ForbiddenException(DatasetDoctorException):
+    """Raised when an authenticated caller is forbidden from accessing a specific resource."""
+
+    def __init__(self, details: str = "Access denied"):
+        super().__init__(details, status_code=403)

@@ -6,9 +6,14 @@ from fastapi import APIRouter, Query, status
 
 from app.api.deps import (
     ComparisonServiceDep,
+    CurrentUserDep,
     DBSessionDep,
     RemediationServiceDep,
+    verify_analysis_owner,
+    verify_dataset_owner,
+    verify_remediation_owner,
 )
+from app.core.rate_limit import rate_limiter
 from app.schemas.remediation import (
     RemediationApplyRequest,
     RemediationExecutionRead,
@@ -35,8 +40,16 @@ async def apply_remediation_endpoint(
     payload: RemediationApplyRequest,
     db: DBSessionDep,
     remediation_service: RemediationServiceDep,
+    current_user: CurrentUserDep,
 ) -> RemediationExecutionRead:
     """Explicitly approve and execute a deterministic remediation plan."""
+    rate_limiter.enforce(f"remediation:{current_user.id}", max_requests=10, window_seconds=60, action_name="Remediation application")
+    await verify_analysis_owner(db=db, run_id=run_id, user_id=current_user.id)
+
+    # Derive human approval identity from verified session if not explicitly specified
+    if not payload.approved_by:
+        payload.approved_by = current_user.email
+
     return await remediation_service.apply_remediation(
         db=db,
         run_id=run_id,
@@ -55,8 +68,11 @@ async def get_remediation_execution_endpoint(
     execution_id: uuid.UUID,
     db: DBSessionDep,
     remediation_service: RemediationServiceDep,
+    current_user: CurrentUserDep,
 ) -> RemediationExecutionRead:
     """Retrieve a specific remediation execution record."""
+    await verify_remediation_owner(db=db, execution_id=execution_id, user_id=current_user.id)
+
     return await remediation_service.get_execution(
         db=db,
         execution_id=execution_id,
@@ -74,8 +90,11 @@ async def list_dataset_remediations_endpoint(
     dataset_id: uuid.UUID,
     db: DBSessionDep,
     remediation_service: RemediationServiceDep,
+    current_user: CurrentUserDep,
 ) -> RemediationListResponse:
     """List all remediation executions for a dataset."""
+    await verify_dataset_owner(db=db, dataset_id=dataset_id, user_id=current_user.id)
+
     items = await remediation_service.list_dataset_remediations(
         db=db,
         dataset_id=dataset_id,
@@ -98,10 +117,13 @@ async def compare_dataset_versions_endpoint(
     dataset_id: uuid.UUID,
     db: DBSessionDep,
     comparison_service: ComparisonServiceDep,
+    current_user: CurrentUserDep,
     v1: uuid.UUID = Query(..., description="Source dataset version UUID"),
     v2: uuid.UUID = Query(..., description="Target / remediated dataset version UUID"),
 ) -> VersionComparisonResponse:
     """Compare two versions of a dataset."""
+    await verify_dataset_owner(db=db, dataset_id=dataset_id, user_id=current_user.id)
+
     return await comparison_service.compare_versions(
         db=db,
         dataset_id=dataset_id,

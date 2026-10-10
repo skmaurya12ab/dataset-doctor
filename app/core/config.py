@@ -95,6 +95,69 @@ class Settings(BaseSettings):
         description="Maximum concurrent threads in V1 ThreadPoolJobRunner",
     )
 
+    # Authentication & Session Security Settings
+    session_cookie_name: str = Field(
+        default="dd_session",
+        description="Name of the HTTP-only session cookie",
+    )
+    session_max_age_seconds: int = Field(
+        default=7 * 24 * 3600,  # 7 days
+        gt=0,
+        description="Session time-to-live in seconds",
+    )
+    cookie_secure: Optional[bool] = Field(
+        default=None,
+        description="Enforce Secure flag on cookies. Defaults to True in production.",
+    )
+    cookie_samesite: Literal["lax", "strict", "none"] = Field(
+        default="lax",
+        description="SameSite cookie policy",
+    )
+    require_email_verification: bool = Field(
+        default=False,
+        description="Whether email verification is required to log in and access datasets",
+    )
+    email_verification_token_expire_hours: int = Field(
+        default=24,
+        gt=0,
+        description="Validity window for email verification tokens in hours",
+    )
+    password_reset_token_expire_hours: int = Field(
+        default=1,
+        gt=0,
+        description="Validity window for password reset tokens in hours",
+    )
+    allowed_origins: str = Field(
+        default="http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000",
+        description="Comma-separated list of allowed CORS origins",
+    )
+
+    # Email & Notification Settings
+    smtp_host: Optional[str] = Field(
+        default=None,
+        description="SMTP host for delivering verification and reset emails",
+    )
+    smtp_port: int = Field(
+        default=587,
+        description="SMTP server port",
+    )
+    smtp_user: Optional[str] = Field(
+        default=None,
+        description="SMTP username",
+    )
+    smtp_password: Optional[str] = Field(
+        default=None,
+        description="SMTP password",
+    )
+    smtp_tls: bool = Field(
+        default=True,
+        description="Use STARTTLS for SMTP connections",
+    )
+    email_from: str = Field(
+        default="noreply@datasetdoctor.local",
+        description="From address for system emails",
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, value: str) -> str:
@@ -120,6 +183,16 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def is_cookie_secure(self) -> bool:
+        if self.cookie_secure is not None:
+            return self.cookie_secure
+        return self.is_production
+
+    @property
+    def parsed_allowed_origins(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
 
 
 @lru_cache

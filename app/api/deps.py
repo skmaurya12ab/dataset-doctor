@@ -2,7 +2,7 @@
 
 from collections.abc import AsyncGenerator
 from typing import Annotated
-from fastapi import Depends
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import Settings, get_settings
@@ -114,6 +114,7 @@ async def shutdown_job_runner() -> None:
         _job_runner = None
 
 
+
 # Type aliases for clean FastAPI dependency declarations
 DBSessionDep = Annotated[AsyncSession, Depends(get_db)]
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -128,3 +129,132 @@ RemediationServiceDep = Annotated["RemediationService", Depends(get_remediation_
 ComparisonServiceDep = Annotated["ComparisonService", Depends(get_comparison_service)]
 
 
+async def get_current_user(
+    request: Request,
+    db: DBSessionDep,
+    settings: SettingsDep,
+) -> "User":
+    """Extract, validate, and resolve the authenticated User entity from server-side session."""
+    from app.core.exceptions import AuthenticationException
+    from app.models.user import User
+    from app.services.auth_service import get_auth_service
+
+    raw_token = request.cookies.get(settings.session_cookie_name)
+    if not raw_token:
+        # Fallback to Authorization: Bearer token (for automated testing & scripts)
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            raw_token = auth_header[7:].strip()
+
+    if not raw_token:
+        raise AuthenticationException("Authentication required. Please log in.")
+
+    auth_service = get_auth_service()
+    user = await auth_service.validate_session(db, raw_token)
+    if not user:
+        raise AuthenticationException("Session is invalid or has expired. Please log in again.")
+
+    if not user.is_active:
+        raise AuthenticationException("User account is inactive. Please contact support.")
+
+    return user
+
+
+async def get_current_active_user(
+    user: Annotated["User", Depends(get_current_user)],
+) -> "User":
+    """Ensure user is active."""
+    return user
+
+
+CurrentUserDep = Annotated["User", Depends(get_current_active_user)]
+
+
+async def verify_dataset_owner(
+    db: AsyncSession,
+    dataset_id: "uuid.UUID",
+    user_id: "uuid.UUID",
+) -> "Dataset":
+    """Verify that the dataset exists and is owned by user_id. Fail closed with 404."""
+    import uuid
+    from sqlalchemy import select
+    from app.core.exceptions import EntityNotFoundException
+    from app.models.dataset import Dataset
+
+    stmt = select(Dataset).where(Dataset.id == dataset_id, Dataset.owner_id == user_id)
+    dataset = (await db.execute(stmt)).scalar_one_or_none()
+    if not dataset:
+        raise EntityNotFoundException("Dataset", str(dataset_id))
+    return dataset
+
+
+async def verify_version_owner(
+    db: AsyncSession,
+    version_id: "uuid.UUID",
+    user_id: "uuid.UUID",
+) -> "DatasetVersion":
+    """Verify that the dataset version exists and belongs to a dataset owned by user_id."""
+    import uuid
+    from sqlalchemy import select
+    from app.core.exceptions import EntityNotFoundException
+    from app.models.dataset import Dataset, DatasetVersion
+
+    stmt = (
+        select(DatasetVersion)
+        .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+        .where(DatasetVersion.id == version_id, Dataset.owner_id == user_id)
+    )
+    version = (await db.execute(stmt)).scalar_one_or_none()
+    if not version:
+        raise EntityNotFoundException("DatasetVersion", str(version_id))
+    return version
+
+
+async def verify_analysis_owner(
+    db: AsyncSession,
+    run_id: "uuid.UUID",
+    user_id: "uuid.UUID",
+) -> "AnalysisRun":
+    """Verify that the analysis run exists and belongs to a dataset owned by user_id."""
+    import uuid
+    from sqlalchemy import select
+    from app.core.exceptions import EntityNotFoundException
+    from app.models.analysis import AnalysisRun
+    from app.models.dataset import Dataset, DatasetVersion
+
+    stmt = (
+        select(AnalysisRun)
+        .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+        .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+        .where(AnalysisRun.id == run_id, Dataset.owner_id == user_id)
+    )
+    run = (await db.execute(stmt)).scalar_one_or_none()
+    if not run:
+        raise EntityNotFoundException("AnalysisRun", str(run_id))
+    return run
+
+
+async def verify_remediation_owner(
+    db: AsyncSession,
+    execution_id: "uuid.UUID",
+    user_id: "uuid.UUID",
+) -> "RemediationExecution":
+    """Verify that the remediation execution belongs to a dataset owned by user_id."""
+    import uuid
+    from sqlalchemy import select
+    from app.core.exceptions import EntityNotFoundException
+    from app.models.analysis import AnalysisRun
+    from app.models.dataset import Dataset, DatasetVersion
+    from app.models.remediation import RemediationExecution
+
+    stmt = (
+        select(RemediationExecution)
+        .join(AnalysisRun, RemediationExecution.analysis_run_id == AnalysisRun.id)
+        .join(DatasetVersion, AnalysisRun.dataset_version_id == DatasetVersion.id)
+        .join(Dataset, DatasetVersion.dataset_id == Dataset.id)
+        .where(RemediationExecution.id == execution_id, Dataset.owner_id == user_id)
+    )
+    execution = (await db.execute(stmt)).scalar_one_or_none()
+    if not execution:
+        raise EntityNotFoundException("RemediationExecution", str(execution_id))
+    return execution

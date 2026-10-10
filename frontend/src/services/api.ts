@@ -23,8 +23,20 @@ import { normalizeAIReport } from '../utils/aiReport'
 import { normalizeVersionComparison } from '../utils/versionComparison'
 export { normalizeAIReport, normalizeVersionComparison }
 
+import type {
+  User,
+  LoginResponse,
+  RegisterRequest,
+  LoginRequest,
+  VerifyEmailRequest,
+  ForgotPasswordRequest,
+  ResetPasswordRequest,
+  MessageResponse,
+} from '../types/auth'
+
 const apiClient = axios.create({
   baseURL: '/api/v1',
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -282,5 +294,41 @@ export const api = {
     throw new Error(
       `Remediation ${executionId} timed out after ${maxAttempts * (intervalMs / 1000)}s`,
     )
+  },
+
+  // --- Authentication ---
+  async register(payload: RegisterRequest): Promise<User> {
+    const response = await apiClient.post<User>('/auth/register', payload)
+    return response.data
+  },
+
+  async login(payload: LoginRequest): Promise<LoginResponse> {
+    const response = await apiClient.post<LoginResponse>('/auth/login', payload)
+    return response.data
+  },
+
+  async logout(): Promise<MessageResponse> {
+    const response = await apiClient.post<MessageResponse>('/auth/logout')
+    return response.data
+  },
+
+  async getCurrentUser(): Promise<User> {
+    const response = await apiClient.get<User>('/auth/me')
+    return response.data
+  },
+
+  async verifyEmail(payload: VerifyEmailRequest): Promise<MessageResponse> {
+    const response = await apiClient.post<MessageResponse>('/auth/verify-email', payload)
+    return response.data
+  },
+
+  async forgotPassword(payload: ForgotPasswordRequest): Promise<MessageResponse> {
+    const response = await apiClient.post<MessageResponse>('/auth/forgot-password', payload)
+    return response.data
+  },
+
+  async resetPassword(payload: ResetPasswordRequest): Promise<MessageResponse> {
+    const response = await apiClient.post<MessageResponse>('/auth/reset-password', payload)
+    return response.data
   },
 }
