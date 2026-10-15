@@ -131,6 +131,53 @@ class Settings(BaseSettings):
         default="http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000",
         description="Comma-separated list of allowed CORS origins",
     )
+    enable_api_docs: bool = Field(
+        default=False,
+        description="Explicitly expose OpenAPI/Swagger documentation in production",
+    )
+
+    # Ingress & Trusted Proxy Settings
+    trusted_proxies: str = Field(
+        default="127.0.0.1,::1",
+        description="Comma-separated list of trusted reverse proxy IP addresses",
+    )
+
+    # User Account Resource Quotas (Abuse Prevention)
+    max_datasets_per_user: int = Field(
+        default=20,
+        ge=1,
+        description="Maximum stored datasets per user account",
+    )
+    max_cumulative_storage_mb_per_user: int = Field(
+        default=500,
+        ge=1,
+        description="Maximum cumulative file and Parquet storage per user in megabytes",
+    )
+    max_concurrent_analysis_jobs_per_user: int = Field(
+        default=2,
+        ge=1,
+        description="Maximum concurrent active (PENDING or RUNNING) analysis jobs per user",
+    )
+    rate_limit_analysis_triggers_per_minute: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum analysis triggers per minute per user",
+    )
+    rate_limit_ai_explanations_per_minute: int = Field(
+        default=20,
+        ge=1,
+        description="Maximum AI explanation requests per minute per user",
+    )
+    rate_limit_ai_plans_per_minute: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum AI remediation plan generation requests per minute per user",
+    )
+    rate_limit_remediations_per_minute: int = Field(
+        default=10,
+        ge=1,
+        description="Maximum remediation applications per minute per user",
+    )
 
     # Email & Notification Settings
     smtp_host: Optional[str] = Field(
@@ -173,6 +220,11 @@ class Settings(BaseSettings):
         return self.max_upload_size_mb * 1024 * 1024
 
     @property
+    def max_cumulative_storage_bytes(self) -> int:
+        """Derived cumulative storage limit in bytes per user."""
+        return self.max_cumulative_storage_mb_per_user * 1024 * 1024
+
+    @property
     def is_development(self) -> bool:
         return self.environment == "development"
 
@@ -192,7 +244,30 @@ class Settings(BaseSettings):
 
     @property
     def parsed_allowed_origins(self) -> list[str]:
-        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        origins = [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+        if self.is_production and "*" in origins:
+            raise ValueError("Wildcard origin '*' is forbidden in production when credentials are enabled.")
+        return origins
+
+    @property
+    def parsed_trusted_proxies(self) -> list[str]:
+        return [proxy.strip() for proxy in self.trusted_proxies.split(",") if proxy.strip()]
+
+    def validate_production_smtp(self) -> None:
+        """Ensure SMTP is configured if email verification is mandatory in production.
+
+        Fails with clear configuration errors without logging password secrets.
+        """
+        if self.is_production and self.require_email_verification:
+            if not self.smtp_host:
+                raise ValueError(
+                    "Production configuration error: 'require_email_verification' is enabled "
+                    "but 'smtp_host' is not configured. Provide SMTP_HOST and credentials."
+                )
+            if not self.email_from:
+                raise ValueError(
+                    "Production configuration error: 'email_from' sender address must be provided."
+                )
 
 
 @lru_cache

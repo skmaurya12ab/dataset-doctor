@@ -190,6 +190,46 @@ class AuthService:
         logger.info("Email verified for user %s", token_record.user.email)
         return True
 
+    async def resend_verification_email(self, db: AsyncSession, email: str) -> bool:
+        """Issue a fresh verification email token and dispatch email.
+
+        Always returns True to prevent user enumeration.
+        """
+        clean_email = normalize_email(email)
+        stmt = select(User).where(User.email == clean_email)
+        user = (await db.execute(stmt)).scalar_one_or_none()
+
+        if not user or not user.is_active or user.is_verified:
+            logger.info("Resend verification requested for nonexistent, inactive, or already-verified: %s", clean_email)
+            return True
+
+        settings = get_settings()
+        raw_token = generate_token(32)
+        token_hash = hash_token(raw_token)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.email_verification_token_expire_hours)
+
+        # Invalidate previous unused verification tokens
+        await db.execute(
+            delete(EmailVerificationToken).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+            )
+        )
+
+        record = EmailVerificationToken(
+            id=uuid.uuid4(),
+            user_id=user.id,
+            token_hash=token_hash,
+            expires_at=expires_at,
+        )
+        db.add(record)
+        await db.commit()
+
+        email_svc = get_email_service()
+        await email_svc.send_verification_email(clean_email, raw_token)
+        logger.info("Dispatched fresh email verification token for %s", clean_email)
+        return True
+
     async def request_password_reset(self, db: AsyncSession, email: str) -> bool:
         """Issue password reset token and dispatch email.
 

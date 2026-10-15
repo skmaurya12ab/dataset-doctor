@@ -2,17 +2,21 @@
 
 from typing import List, Optional
 import uuid
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
+
 
 from app.api.deps import (
     AnalysisServiceDep,
+    CSRFDep,
     CurrentUserDep,
     DBSessionDep,
+    SettingsDep,
     verify_analysis_owner,
+    verify_csrf_token,
     verify_dataset_owner,
     verify_version_owner,
 )
-from app.core.exceptions import EntityNotFoundException
+from app.core.exceptions import EntityNotFoundException, QuotaExceededException
 from app.core.rate_limit import rate_limiter
 from app.schemas.analysis import (
     AnalysisRequest,
@@ -24,6 +28,7 @@ from app.schemas.analysis import (
     QualityIssueRead,
     VisualizationDataResponse,
 )
+from app.services.quota_service import QuotaService, get_quota_service
 
 router = APIRouter(tags=["Analysis"])
 
@@ -42,10 +47,25 @@ async def trigger_analysis_endpoint(
     db: DBSessionDep,
     analysis_service: AnalysisServiceDep,
     current_user: CurrentUserDep,
+    settings: SettingsDep,
+    quota_service: QuotaService = Depends(get_quota_service),
+    csrf: None = Depends(verify_csrf_token),
 ) -> AnalysisResponse:
-    rate_limiter.enforce(f"analyze:{current_user.id}", max_requests=10, window_seconds=60, action_name="Analysis trigger")
+    rate_limiter.enforce(
+        f"analyze:{current_user.id}",
+        max_requests=settings.rate_limit_analysis_triggers_per_minute,
+        window_seconds=60,
+        action_name="Analysis trigger",
+    )
 
-    # Verify ownership before queuing analysis
+    # 1. Enforce concurrent analysis quota before queuing work
+    await quota_service.check_concurrent_analysis_quota(
+        db=db,
+        user_id=current_user.id,
+        max_concurrent_jobs=settings.max_concurrent_analysis_jobs_per_user,
+    )
+
+    # 2. Verify ownership before queuing analysis
     await verify_dataset_owner(db=db, dataset_id=dataset_id, user_id=current_user.id)
     await verify_version_owner(db=db, version_id=version_id, user_id=current_user.id)
 
@@ -59,6 +79,7 @@ async def trigger_analysis_endpoint(
         analysis_run_id=run.id,
         status=run.status,
     )
+
 
 
 @router.get(

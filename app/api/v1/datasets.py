@@ -3,21 +3,33 @@
 from pathlib import Path
 from typing import List, Optional
 import uuid
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+
 from sqlalchemy import desc, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUserDep, DBSessionDep, IngestionServiceDep, StorageServiceDep
-from app.core.exceptions import EntityNotFoundException, MalformedFileException
+from app.api.deps import (
+    CSRFDep,
+    CurrentUserDep,
+    DBSessionDep,
+    IngestionServiceDep,
+    SettingsDep,
+    StorageServiceDep,
+    verify_csrf_token,
+)
+from app.core.exceptions import EntityNotFoundException, MalformedFileException, QuotaExceededException
 from app.core.logging import get_logger
 from app.core.rate_limit import rate_limiter
 from app.models.dataset import Dataset, DatasetVersion
+from app.schemas.auth import MessageResponse
 from app.schemas.dataset import (
     DatasetListItem,
     DatasetPreviewResponse,
     DatasetRead,
     DatasetUploadResponse,
 )
+from app.services.account_service import AccountService, get_account_service
+from app.services.quota_service import QuotaService, get_quota_service
 
 logger = get_logger(__name__)
 
@@ -30,6 +42,9 @@ async def upload_dataset(
     storage: StorageServiceDep,
     ingestion: IngestionServiceDep,
     current_user: CurrentUserDep,
+    settings: SettingsDep,
+    quota_service: QuotaService = Depends(get_quota_service),
+    csrf: None = Depends(verify_csrf_token),
     file: UploadFile = File(...),
     name: Optional[str] = Form(None),
     description: Optional[str] = Form(None),
@@ -38,7 +53,7 @@ async def upload_dataset(
 ) -> DatasetUploadResponse:
     """Upload a tabular dataset (CSV, XLSX, JSON, Parquet).
     
-    Validates file integrity, saves original upload, converts canonically to Parquet,
+    Validates file integrity, enforces quotas, saves original upload, converts canonically to Parquet,
     extracts schema metadata, persists immutable version records, and associates ownership.
     """
     rate_limiter.enforce(f"upload:{current_user.id}", max_requests=20, window_seconds=60, action_name="Dataset upload")
@@ -46,10 +61,18 @@ async def upload_dataset(
     if not file or not file.filename:
         raise MalformedFileException("No file provided in upload request.")
 
-    # 1. Determine and validate format
+    # 1. Enforce dataset count quota for new datasets
+    if not dataset_id:
+        await quota_service.check_dataset_count_quota(
+            db=db,
+            user_id=current_user.id,
+            max_datasets=settings.max_datasets_per_user,
+        )
+
+    # 2. Determine and validate format
     format_key = ingestion.determine_format(file.filename)
 
-    # 2. Determine target dataset & version number
+    # 3. Determine target dataset & version number
     parent_version_id = None
     target_dataset: Optional[Dataset] = None
 
@@ -76,7 +99,7 @@ async def upload_dataset(
         target_version_number = 1
         dataset_name = name or Path(file.filename).stem or f"Dataset_{resolved_dataset_id.hex[:6]}"
 
-    # 3. Stream and persist original file to disk with SHA-256 calculation
+    # 4. Stream and persist original file to disk with SHA-256 calculation
     saved_file_path, sha256_hash, file_size_bytes = await storage.save_uploaded_stream(
         dataset_id=resolved_dataset_id,
         version_number=target_version_number,
@@ -84,10 +107,23 @@ async def upload_dataset(
         file_stream=file.file,
     )
 
-    # 4. Check for duplicate upload in existing dataset
+    # 5. Enforce cumulative storage quota (clean up saved file on violation)
+    try:
+        await quota_service.check_cumulative_storage_quota(
+            db=db,
+            user_id=current_user.id,
+            incoming_bytes=file_size_bytes,
+            max_storage_bytes=settings.max_cumulative_storage_bytes,
+        )
+    except QuotaExceededException:
+        storage.delete_file(saved_file_path)
+        raise
+
+    # 6. Check for duplicate upload in existing dataset
     if target_dataset:
         for v in target_dataset.versions:
             if v.sha256_hash == sha256_hash:
+                storage.delete_file(saved_file_path)
                 logger.info(
                     "Identical file upload detected for dataset %s (matches version %d)",
                     resolved_dataset_id,
@@ -104,19 +140,22 @@ async def upload_dataset(
                     status="ALREADY_EXISTS",
                 )
 
-    # 5. Parse dataset into standardized DataFrame container
-    loaded_data = ingestion.parse_file(
-        file_path=saved_file_path,
-        format_key=format_key,
-        original_filename=file.filename,
-    )
+    # 7. Parse dataset into standardized DataFrame container and save canonical Parquet
+    try:
+        loaded_data = ingestion.parse_file(
+            file_path=saved_file_path,
+            format_key=format_key,
+            original_filename=file.filename,
+        )
+        parquet_path = storage.save_canonical_parquet(
+            df=loaded_data.dataframe,
+            dataset_id=resolved_dataset_id,
+            version_number=target_version_number,
+        )
+    except Exception:
+        storage.delete_file(saved_file_path)
+        raise
 
-    # 6. Normalize canonical Parquet file
-    parquet_path = storage.save_canonical_parquet(
-        df=loaded_data.dataframe,
-        dataset_id=resolved_dataset_id,
-        version_number=target_version_number,
-    )
 
     # 7. Extract deterministic metadata schema
     raw_schema = ingestion.extract_raw_schema(loaded_data.dataframe)
@@ -277,3 +316,27 @@ async def get_dataset_version_preview(
         limit=limit,
         offset=offset,
     )
+
+
+@router.delete(
+    "/{dataset_id}",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete dataset and all versions and artifacts",
+)
+async def delete_dataset_endpoint(
+    dataset_id: uuid.UUID,
+    db: DBSessionDep,
+    storage: StorageServiceDep,
+    current_user: CurrentUserDep,
+    account_service: AccountService = Depends(get_account_service),
+    csrf: None = Depends(verify_csrf_token),
+) -> MessageResponse:
+    """Permanently delete a dataset, all its versions, analysis runs, and physical files."""
+    await account_service.delete_dataset(
+        db=db,
+        storage=storage,
+        dataset_id=dataset_id,
+        user_id=current_user.id,
+    )
+    return MessageResponse(message=f"Dataset '{dataset_id}' and all associated files deleted successfully.")

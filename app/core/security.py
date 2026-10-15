@@ -10,7 +10,9 @@ Implements:
 import hashlib
 import re
 import secrets
+from typing import Any, Optional
 from argon2 import PasswordHasher
+
 from argon2.exceptions import VerifyMismatchError, VerificationError, InvalidHashError
 
 # Argon2id password hasher with standard memory, time, and parallelism parameters
@@ -65,3 +67,35 @@ def validate_email_format(email: str) -> bool:
     """Basic structural validation for email addresses."""
     pattern = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
     return bool(re.match(pattern, email))
+
+
+def constant_time_compare(val1: str, val2: str) -> bool:
+    """Compare two strings in constant time to prevent timing side channels."""
+    if not val1 or not val2:
+        return False
+    return secrets.compare_digest(val1.encode("utf-8"), val2.encode("utf-8"))
+
+
+def extract_client_ip(request: Any, trusted_proxies: Optional[list[str]] = None) -> str:
+    """Safely extract remote client IP address respecting trusted reverse proxies.
+
+    If request.client.host is not in trusted_proxies, X-Forwarded-For is ignored to
+    prevent client IP spoofing attacks against the rate limiter.
+    """
+    if not hasattr(request, "client") or not request.client or not request.client.host:
+        return "unknown"
+
+    direct_ip = request.client.host
+    trusted = trusted_proxies if trusted_proxies is not None else ["127.0.0.1", "::1"]
+
+    if direct_ip in trusted:
+        # Inspect X-Forwarded-For header added by trusted reverse proxy
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                return parts[0]
+        real_ip = request.headers.get("X-Real-IP")
+        if real_ip:
+            return real_ip.strip()
+    return direct_ip

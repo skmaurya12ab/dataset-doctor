@@ -99,3 +99,17 @@ class ForbiddenException(DatasetDoctorException):
 
     def __init__(self, details: str = "Access denied"):
         super().__init__(details, status_code=403)
+
+
+class QuotaExceededException(DatasetDoctorException):
+    """Raised when an account exceeds storage, dataset count, or concurrent job quotas."""
+
+    def __init__(self, details: str = "Resource quota exceeded"):
+        super().__init__(details, status_code=429)
+
+
+class CSRFException(DatasetDoctorException):
+    """Raised when CSRF token verification fails on state-changing requests."""
+
+    def __init__(self, details: str = "Invalid or missing CSRF token"):
+        super().__init__(details, status_code=403)

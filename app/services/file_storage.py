@@ -184,3 +184,23 @@ class FileStorageService:
         except Exception as exc:
             logger.exception("Failed to read Parquet preview for dataset %s v%d: %s", dataset_id, version_number, str(exc))
             raise StorageException(f"Failed to read Parquet preview: {exc}") from exc
+
+    def delete_dataset_dir(self, dataset_id: uuid.UUID) -> bool:
+        """Safely remove the entire storage tree for a dataset."""
+        import shutil
+        dataset_dir = self.base_dir / "datasets" / str(dataset_id)
+        if dataset_dir.exists() and dataset_dir.is_dir():
+            shutil.rmtree(dataset_dir, ignore_errors=True)
+            logger.info("Deleted storage directory for dataset %s", dataset_id)
+            return True
+        return False
+
+    def delete_file(self, file_path: Path) -> bool:
+        """Safely remove an individual file if it exists."""
+        try:
+            if file_path.exists():
+                file_path.unlink()
+                return True
+        except Exception as exc:
+            logger.warning("Could not delete file %s: %s", file_path, exc)
+        return False

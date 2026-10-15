@@ -2,18 +2,22 @@
 
 from typing import List
 import uuid
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import (
     ComparisonServiceDep,
+    CSRFDep,
     CurrentUserDep,
     DBSessionDep,
     RemediationServiceDep,
+    SettingsDep,
     verify_analysis_owner,
+    verify_csrf_token,
     verify_dataset_owner,
     verify_remediation_owner,
 )
 from app.core.rate_limit import rate_limiter
+
 from app.schemas.remediation import (
     RemediationApplyRequest,
     RemediationExecutionRead,
@@ -41,9 +45,16 @@ async def apply_remediation_endpoint(
     db: DBSessionDep,
     remediation_service: RemediationServiceDep,
     current_user: CurrentUserDep,
+    settings: SettingsDep,
+    csrf: None = Depends(verify_csrf_token),
 ) -> RemediationExecutionRead:
     """Explicitly approve and execute a deterministic remediation plan."""
-    rate_limiter.enforce(f"remediation:{current_user.id}", max_requests=10, window_seconds=60, action_name="Remediation application")
+    rate_limiter.enforce(
+        f"remediation:{current_user.id}",
+        max_requests=settings.rate_limit_remediations_per_minute,
+        window_seconds=60,
+        action_name="Remediation application",
+    )
     await verify_analysis_owner(db=db, run_id=run_id, user_id=current_user.id)
 
     # Derive human approval identity from verified session if not explicitly specified
@@ -55,6 +66,7 @@ async def apply_remediation_endpoint(
         run_id=run_id,
         request=payload,
     )
+
 
 
 @router.get(

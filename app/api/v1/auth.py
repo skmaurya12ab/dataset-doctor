@@ -4,7 +4,14 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import DBSessionDep, get_current_user
+from app.api.deps import (
+    CSRFDep,
+    DBSessionDep,
+    StorageServiceDep,
+    get_current_user,
+    get_trusted_client_ip,
+    verify_csrf_token,
+)
 from app.core.config import Settings, get_settings
 from app.core.exceptions import AuthenticationException
 from app.core.logging import get_logger
@@ -15,12 +22,14 @@ from app.schemas.auth import (
     ForgotPasswordRequest,
     LoginResponse,
     MessageResponse,
+    ResendVerificationRequest,
     ResetPasswordRequest,
     UserLoginRequest,
     UserRegisterRequest,
     UserResponse,
     VerifyEmailRequest,
 )
+from app.services.account_service import AccountService, get_account_service
 from app.services.auth_service import AuthService, get_auth_service
 
 logger = get_logger(__name__)
@@ -29,11 +38,10 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 
 
 def get_client_ip(request: Request) -> str:
-    """Safely extract remote client IP address for rate limiting."""
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Safely extract remote client IP address respecting trusted reverse proxy configurations."""
+    settings = get_settings()
+    return get_trusted_client_ip(request, settings)
+
 
 
 @router.post(
@@ -218,3 +226,49 @@ async def reset_password(
     return MessageResponse(
         message="Password has been reset successfully. You may now log in with your new password."
     )
+
+
+@router.post(
+    "/resend-verification",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Resend account email verification link",
+)
+async def resend_verification(
+    req: ResendVerificationRequest,
+    request: Request,
+    db: DBSessionDep,
+    auth_service: AuthService = Depends(get_auth_service),
+) -> MessageResponse:
+    """Request a fresh email verification link. Non-disclosing response prevents enumeration."""
+    client_ip = get_client_ip(request)
+    rate_limiter.enforce(f"resend_verify:{client_ip}", max_requests=5, window_seconds=60, action_name="Resend verification")
+
+    await auth_service.resend_verification_email(db=db, email=req.email)
+    return MessageResponse(
+        message="If an account with this email address requires verification, a fresh link has been sent."
+    )
+
+
+@router.delete(
+    "/me",
+    response_model=MessageResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently delete authenticated user account and all owned data",
+)
+async def delete_me(
+    request: Request,
+    response: Response,
+    db: DBSessionDep,
+    storage: StorageServiceDep,
+    current_user: User = Depends(get_current_user),
+    account_service: AccountService = Depends(get_account_service),
+    settings: Settings = Depends(get_settings),
+    csrf: None = Depends(verify_csrf_token),
+) -> MessageResponse:
+    """Purge authenticated user account, all owned datasets, Parquet files, reports, and sessions."""
+    await account_service.delete_user_account(db=db, storage=storage, user_id=current_user.id)
+
+    response.delete_cookie(key=settings.session_cookie_name, path="/")
+    response.delete_cookie(key="dd_csrf", path="/")
+    return MessageResponse(message="Account and all associated datasets deleted successfully.")

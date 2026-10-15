@@ -33,11 +33,13 @@ COPY alembic/ ./alembic/
 COPY alembic.ini .
 
 # Create uploads directory and non-privileged user for security
-RUN mkdir -p uploads storage && \
+ENV UPLOAD_DIR=/app/uploads
+RUN mkdir -p /app/uploads /app/storage && \
     useradd -u 1000 -m appuser && \
     chown -R appuser:appuser /app
 
 USER appuser
+
 
 # Expose FastAPI HTTP port
 EXPOSE 8000

@@ -2,9 +2,18 @@
 
 from typing import Optional
 import uuid
-from fastapi import APIRouter, Body, Query, status
+from fastapi import APIRouter, Body, Depends, Query, status
 
-from app.api.deps import AIServiceDep, CurrentUserDep, DBSessionDep, verify_analysis_owner
+
+from app.api.deps import (
+    AIServiceDep,
+    CSRFDep,
+    CurrentUserDep,
+    DBSessionDep,
+    SettingsDep,
+    verify_analysis_owner,
+    verify_csrf_token,
+)
 from app.core.rate_limit import rate_limiter
 from app.schemas.ai import (
     AIReportResponse,
@@ -31,9 +40,16 @@ async def explain_finding_endpoint(
     db: DBSessionDep,
     ai_service: AIServiceDep,
     current_user: CurrentUserDep,
+    settings: SettingsDep,
+    csrf: None = Depends(verify_csrf_token),
 ) -> FindingExplanationResponse:
     """Generate or retrieve cached grounded explanation for an individual finding."""
-    rate_limiter.enforce(f"ai_explain:{current_user.id}", max_requests=20, window_seconds=60, action_name="AI explanation")
+    rate_limiter.enforce(
+        f"ai_explain:{current_user.id}",
+        max_requests=settings.rate_limit_ai_explanations_per_minute,
+        window_seconds=60,
+        action_name="AI explanation",
+    )
     await verify_analysis_owner(db=db, run_id=run_id, user_id=current_user.id)
 
     return await ai_service.explain_issue(
@@ -58,6 +74,8 @@ async def generate_ai_plan_endpoint(
     db: DBSessionDep,
     ai_service: AIServiceDep,
     current_user: CurrentUserDep,
+    settings: SettingsDep,
+    csrf: None = Depends(verify_csrf_token),
     payload: Optional[GenerateAIPlanRequest] = Body(default=None),
     force_regenerate: bool = Query(
         default=False,
@@ -65,7 +83,12 @@ async def generate_ai_plan_endpoint(
     ),
 ) -> AIReportResponse:
     """Generate or retrieve advisory remediation plan for a completed analysis run."""
-    rate_limiter.enforce(f"ai_plan:{current_user.id}", max_requests=10, window_seconds=60, action_name="AI remediation plan")
+    rate_limiter.enforce(
+        f"ai_plan:{current_user.id}",
+        max_requests=settings.rate_limit_ai_plans_per_minute,
+        window_seconds=60,
+        action_name="AI remediation plan",
+    )
     await verify_analysis_owner(db=db, run_id=run_id, user_id=current_user.id)
 
     force = force_regenerate or (payload.force_regenerate if payload else False)
@@ -74,6 +97,7 @@ async def generate_ai_plan_endpoint(
         run_id=run_id,
         force_regenerate=force,
     )
+
 
 
 @router.get(

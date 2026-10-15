@@ -570,3 +570,46 @@ class AnalysisService:
             "average_readiness_score": round(float(avg_score), 1) if avg_score is not None else None,
         }
 
+    async def recover_interrupted_jobs(self, db: AsyncSession) -> int:
+        """Scan for orphaned runs left in PENDING or RUNNING after container/process restart.
+
+        Marks them as FAILED with a clear diagnostic message, preserving job parameters and history.
+        Ensures restart recovery cannot overwrite currently running jobs.
+        """
+        now = datetime.now(timezone.utc)
+        stmt = select(AnalysisRun).where(
+            AnalysisRun.status.in_([AnalysisStatus.PENDING.value, AnalysisStatus.RUNNING.value])
+        )
+        res = await db.execute(stmt)
+        interrupted_runs = res.scalars().all()
+
+        recovered_count = len(interrupted_runs)
+        for run in interrupted_runs:
+            run.status = AnalysisStatus.FAILED.value
+            run.error_message = "Analysis job interrupted by server restart or process termination."
+            run.completed_at = now
+            logger.warning(
+                "Recovered orphaned analysis run %s (was in-flight, now marked FAILED)",
+                run.id,
+            )
+
+        # Also reconcile remediation executions stuck in RUNNING or VALIDATING
+        from app.models.remediation import RemediationExecution, RemediationExecutionStatus
+        rem_stmt = select(RemediationExecution).where(
+            RemediationExecution.status.in_([
+                RemediationExecutionStatus.RUNNING.value,
+                RemediationExecutionStatus.VALIDATING.value,
+            ])
+        )
+        rem_res = await db.execute(rem_stmt)
+        interrupted_rems = rem_res.scalars().all()
+        for rem in interrupted_rems:
+            rem.status = RemediationExecutionStatus.FAILED.value
+            rem.error_message = "Remediation execution interrupted by server restart."
+            logger.warning("Recovered orphaned remediation execution %s (marked FAILED)", rem.id)
+
+        if recovered_count or interrupted_rems:
+            await db.commit()
+            logger.info("Startup recovery reconciled %d runs and %d remediations", recovered_count, len(interrupted_rems))
+        return recovered_count
+

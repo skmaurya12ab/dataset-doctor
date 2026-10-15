@@ -162,12 +162,58 @@ async def get_current_user(
 
 async def get_current_active_user(
     user: Annotated["User", Depends(get_current_user)],
+    settings: SettingsDep,
 ) -> "User":
-    """Ensure user is active."""
+    """Ensure user is active and email-verified when verification is enforced."""
+    if settings.require_email_verification and not user.is_verified:
+        from app.core.exceptions import ForbiddenException
+        raise ForbiddenException("Email verification required. Please verify your email address before accessing datasets.")
     return user
 
 
+async def verify_csrf_token(
+    request: Request,
+    settings: SettingsDep,
+) -> None:
+    """Verify double-submit CSRF token on state-changing requests authenticated via session cookie."""
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return
+
+    # Check if request path is exempt from CSRF (initial authentication flows)
+    exempt_paths = {
+        "/api/v1/auth/login",
+        "/api/v1/auth/register",
+        "/api/v1/auth/verify-email",
+        "/api/v1/auth/forgot-password",
+        "/api/v1/auth/reset-password",
+        "/api/v1/auth/resend-verification",
+    }
+    if request.url.path in exempt_paths:
+        return
+
+    session_cookie = request.cookies.get(settings.session_cookie_name)
+    if not session_cookie:
+        # Bearer header or unauthenticated requests are not subject to cookie CSRF
+        return
+
+    csrf_cookie = request.cookies.get("dd_csrf")
+    csrf_header = request.headers.get("X-CSRF-Token") or request.headers.get("X-XSRF-Token")
+
+    from app.core.security import constant_time_compare
+    if not csrf_cookie or not csrf_header or not constant_time_compare(csrf_cookie, csrf_header):
+        from app.core.exceptions import CSRFException
+        raise CSRFException("Invalid or missing CSRF token.")
+
+
+def get_trusted_client_ip(request: Request, settings: Settings) -> str:
+    """Extract client IP address respecting trusted reverse proxy configurations."""
+    from app.core.security import extract_client_ip
+    return extract_client_ip(request, settings.parsed_trusted_proxies)
+
+
 CurrentUserDep = Annotated["User", Depends(get_current_active_user)]
+CSRFDep = Annotated[None, Depends(verify_csrf_token)]
+
 
 
 async def verify_dataset_owner(

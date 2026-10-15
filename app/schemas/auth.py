@@ -73,6 +73,21 @@ class VerifyEmailRequest(BaseModel):
     token: str = Field(min_length=10, description="Verification token received via email")
 
 
+class ResendVerificationRequest(BaseModel):
+    """Payload for requesting a fresh verification email token."""
+
+    email: str = Field(description="User registered email address")
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email_address(cls, v: str) -> str:
+        clean = v.strip().lower()
+        if not validate_email_format(clean):
+            raise ValueError("Invalid email address format.")
+        return clean
+
+
+
 class ForgotPasswordRequest(BaseModel):
     """Payload for initiating a password reset workflow."""
 

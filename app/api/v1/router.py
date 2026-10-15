@@ -1,9 +1,16 @@
 """API v1 root router combining modular endpoint sub-routers."""
 
-from fastapi import APIRouter
+import uuid
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_db
 from app.api.v1.ai import router as ai_router
 from app.api.v1.analyses import router as analyses_router
 from app.api.v1.datasets import router as datasets_router
+from app.core.config import Settings, get_settings
 from app.schemas.health import HealthResponse
 
 v1_router = APIRouter(prefix="/v1")
@@ -13,6 +20,42 @@ v1_router = APIRouter(prefix="/v1")
 async def v1_health_check() -> HealthResponse:
     """API v1 health status endpoint."""
     return HealthResponse(status="ok")
+
+
+@v1_router.get("/ready", tags=["System"])
+async def v1_readiness_check(
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    """API v1 readiness probe."""
+    checks = {"database": "unknown", "storage": "unknown"}
+    status_code = 200
+
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = "connected"
+    except Exception:
+        checks["database"] = "unavailable"
+        status_code = 503
+
+    try:
+        if settings.upload_dir.exists() and settings.upload_dir.is_dir():
+            test_file = settings.upload_dir / f".ready_test_{uuid.uuid4().hex}"
+            test_file.touch()
+            test_file.unlink()
+            checks["storage"] = "available"
+        else:
+            checks["storage"] = "missing_directory"
+            status_code = 503
+    except Exception:
+        checks["storage"] = "inaccessible"
+        status_code = 503
+
+    return JSONResponse(
+        status_code=status_code,
+        content={"status": "ready" if status_code == 200 else "unready", "checks": checks},
+    )
+
 
 
 # Authentication and identity management endpoints

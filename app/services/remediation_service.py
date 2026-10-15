@@ -223,6 +223,28 @@ class RemediationService:
                     total_bytes += len(chunk)
                 new_sha256 = hasher.hexdigest()
 
+            # Enforce storage quota for the dataset owner
+            from app.core.config import get_settings
+            from app.services.quota_service import get_quota_service
+            dataset_rec = await db.get(Dataset, dataset_id)
+            if dataset_rec and dataset_rec.owner_id:
+                settings = get_settings()
+                quota_svc = get_quota_service()
+                try:
+                    await quota_svc.check_cumulative_storage_quota(
+                        db=db,
+                        user_id=dataset_rec.owner_id,
+                        incoming_bytes=total_bytes,
+                        max_storage_bytes=settings.max_cumulative_storage_bytes,
+                    )
+                except Exception as q_exc:
+                    if temp_parquet_path and temp_parquet_path.exists():
+                        temp_parquet_path.unlink(missing_ok=True)
+                    execution.status = RemediationExecutionStatus.FAILED.value
+                    execution.error_message = f"Storage quota exceeded: {q_exc}"
+                    await db.commit()
+                    raise
+
             # Verify hash condition: if output is byte-identical, document; otherwise confirm divergence
             if new_sha256 == source_version.sha256_hash:
                 logger.warning(
@@ -234,6 +256,7 @@ class RemediationService:
             # Atomic move into final canonical location
             temp_parquet_path.replace(target_parquet_path)
             temp_parquet_path = None  # moved successfully
+
 
             # 14. Build structured change summary and raw schema
             change_summary_dict = {

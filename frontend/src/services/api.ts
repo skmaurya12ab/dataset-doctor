@@ -35,12 +35,15 @@ import type {
 } from '../types/auth'
 
 const apiClient = axios.create({
-  baseURL: '/api/v1',
+  baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   withCredentials: true,
+  xsrfCookieName: 'dd_csrf',
+  xsrfHeaderName: 'X-CSRF-Token',
   headers: {
     'Content-Type': 'application/json',
   },
 })
+
 
 export const api = {
   // --- Overview & Dashboard ---
@@ -329,6 +332,21 @@ export const api = {
 
   async resetPassword(payload: ResetPasswordRequest): Promise<MessageResponse> {
     const response = await apiClient.post<MessageResponse>('/auth/reset-password', payload)
+    return response.data
+  },
+
+  async resendVerification(email: string): Promise<MessageResponse> {
+    const response = await apiClient.post<MessageResponse>('/auth/resend-verification', { email })
+    return response.data
+  },
+
+  async deleteAccount(): Promise<MessageResponse> {
+    const response = await apiClient.delete<MessageResponse>('/auth/me')
+    return response.data
+  },
+
+  async deleteDataset(datasetId: string): Promise<MessageResponse> {
+    const response = await apiClient.delete<MessageResponse>(`/datasets/${datasetId}`)
     return response.data
   },
 }
