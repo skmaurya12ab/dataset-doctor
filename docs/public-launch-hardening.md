@@ -65,9 +65,11 @@ When a user upload or remediation execution exceeds the storage quota:
 
 ## 3. Email Delivery & Production Validation
 
-- **Fail-Fast Startup**: In production (`ENVIRONMENT=production`), the application runs `validate_production_smtp()` during startup lifecycle. If `SMTP_HOST`, `SMTP_USER`, or credentials are missing or default, startup halts immediately with clear remediation steps without leaking credentials.
-- **Mock Provider for Testing**: In testing and local development, `MockEmailService` captures emails in memory without requiring external network connectivity.
-- **Timing & Existence Attacks**: Registration, password reset requests, and verification emails return generic success messages regardless of whether an account exists, preventing user enumeration.
+- **Fail-Fast Startup**: In production (`ENVIRONMENT=production`), startup validates the explicitly selected `EMAIL_PROVIDER` (`smtp` or `apps_script`) and rejects `mock` or incomplete provider configuration.
+- **Mock Provider for Testing**: In testing and local development, `MockEmailService` keeps messages in an explicit in-memory test interface and does not log tokens, links, bodies, or recipient addresses.
+- **Abuse Limits**: PostgreSQL-backed daily delivery caps and per-account cooldowns reserve capacity before provider calls; the Apps Script relay applies independent daily, cooldown, nonce-replay, and request-idempotency controls.
+- **Non-disclosing Requests**: Password-reset and verification-resend responses do not claim that a message was delivered and do not reveal whether an account exists. Duplicate registration remains an explicit validation error in the current UX.
+- **Manual Setup**: The Apps Script relay has not been deployed or tested against a live inbox. See [Authentication Email Delivery](email-delivery.md) for the manual account, sender-consent, secret, and inbox-smoke-test steps.
 
 ---
 

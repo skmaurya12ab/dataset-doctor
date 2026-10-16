@@ -172,9 +172,32 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
     })
   })
 
+  it('prefills the account email and requests a verification resend', async () => {
+    vi.mocked(api.resendVerification).mockResolvedValue({
+      message: 'If an account needs verification, the request has been received. Check your inbox later.',
+      success: true,
+    })
+
+    render(
+      <MemoryRouter
+        initialEntries={[{ pathname: '/verify-email', state: { email: 'resend@example.com' } }]}
+      >
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByLabelText('Account Email')).toHaveValue('resend@example.com')
+    fireEvent.click(screen.getByRole('button', { name: /Resend Verification Email/i }))
+
+    await waitFor(() => {
+      expect(api.resendVerification).toHaveBeenCalledWith('resend@example.com')
+      expect(screen.getByRole('status')).toHaveTextContent(/request has been received/i)
+    })
+  })
+
   it('submits email on ForgotPasswordPage and displays confirmation', async () => {
     vi.mocked(api.forgotPassword).mockResolvedValue({
-      message: 'If an account exists with this email address, password reset instructions have been sent.',
+      message: 'If an account exists with this email address, the request has been received. Check your inbox later; if no message arrives, try again later.',
       success: true,
     })
 
@@ -191,7 +214,7 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
 
     await waitFor(() => {
       expect(api.forgotPassword).toHaveBeenCalledWith({ email: 'forgot@example.com' })
-      expect(screen.getByText('Instructions Sent')).toBeInTheDocument()
+      expect(screen.getByText('Request Received')).toBeInTheDocument()
     })
   })
 

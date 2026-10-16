@@ -156,15 +156,12 @@ A thread-safe in-process sliding-window rate limiter (`app/core/rate_limit.py`) 
 ## 6. Email Delivery Abstraction
 
 The application abstracts email delivery via `BaseEmailService` (`app/services/email_service.py`):
-- **Development/Testing (`MockEmailService`)**: Logs outgoing verification and reset emails in-memory and to application logs without external network calls.
-- **Production (`SMTPEmailService`)**: Sends HTML and plaintext emails using standard STARTTLS/TLS SMTP.
-- Configured via environment variables:
-  - `SMTP_HOST`: Hostname of SMTP relay (e.g. `smtp.sendgrid.net`, `smtp.mailgun.org`, `email-smtp.us-east-1.amazonaws.com`)
-  - `SMTP_PORT`: Port (default `587`)
-  - `SMTP_USER`: SMTP username / API key ID
-  - `SMTP_PASSWORD`: SMTP secret / API key
-  - `SMTP_TLS`: TLS flag (`true`)
-  - `EMAIL_FROM`: Verified sender address (e.g. `noreply@datasetdoctor.com`)
+- **Development/Testing (`MockEmailService`)**: Keeps messages in an explicit in-memory test interface and does not log tokens, links, message bodies, or recipients.
+- **Production (`SMTPEmailService`)**: Sends plaintext action-link emails over STARTTLS. Configure `EMAIL_PROVIDER=smtp`, `SMTP_HOST`, `SMTP_PORT`, paired `SMTP_USER`/`SMTP_PASSWORD` when required by the relay, `SMTP_TLS=true`, and `EMAIL_FROM`.
+- **Production (`AppsScriptEmailService`)**: Calls the fixed-template, HMAC-authenticated HTTPS relay in `integrations/apps-script-email-relay/Code.gs`. Configure `EMAIL_PROVIDER=apps_script`, `APPS_SCRIPT_URL`, `APPS_SCRIPT_HMAC_SECRET`, and `APPLICATION_BASE_URL`.
+- Production rejects `EMAIL_PROVIDER=mock` or incomplete selected provider configuration at startup. No credentials are provided by the repository. See [Authentication Email Delivery](email-delivery.md) before deployment.
+
+Delivery attempts have a PostgreSQL-backed per-account cooldown and a daily cap. Registration delivery failure leaves the account available for a later resend and returns a temporary service error when verification is required. Resend and reset responses do not assert successful delivery; reset responses stay generic for known and unknown accounts. Duplicate registration still returns an explicit validation error, which is an intentional account-enumeration tradeoff in the current UX.
 
 ---
 

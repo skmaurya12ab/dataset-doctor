@@ -71,15 +71,22 @@ DATABASE_URL=postgresql+asyncpg://dd_user:super_secret_db_pass@db:5432/dataset_d
 # Persistent Storage
 UPLOAD_DIR=/app/uploads                         # Absolute path mounted to persistent volume
 
-# Email Delivery (SMTP)
+# Email Delivery
 REQUIRE_EMAIL_VERIFICATION=true
-SMTP_HOST=smtp.sendgrid.net                     # Or AWS SES / Postmark
-SMTP_PORT=587
-SMTP_USER=apikey
-SMTP_PASSWORD=your_real_smtp_api_key
-SMTP_FROM_EMAIL=no-reply@yourdomain.com
-SMTP_FROM_NAME="Dataset Doctor"
-SMTP_USE_TLS=true
+EMAIL_PROVIDER=apps_script                     # Or smtp; never use mock in production
+APPLICATION_BASE_URL=https://doctor.yourdomain.com
+EMAIL_DAILY_SEND_CAP=20
+EMAIL_RECIPIENT_COOLDOWN_SECONDS=900
+APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
+APPS_SCRIPT_HMAC_SECRET=store_a_32_byte_random_secret_here
+APPS_SCRIPT_TIMEOUT_SECONDS=12
+# SMTP alternative (use only when EMAIL_PROVIDER=smtp):
+# SMTP_HOST=smtp.example.net
+# SMTP_PORT=587
+# SMTP_USER=your_smtp_user
+# SMTP_PASSWORD=your_smtp_password
+# SMTP_TLS=true
+# EMAIL_FROM=no-reply@yourdomain.com
 
 # Resource Quotas & Abuse Prevention
 MAX_DATASETS_PER_USER=20
@@ -90,6 +97,8 @@ RATE_LIMIT_AI_EXPLAIN=20/minute
 RATE_LIMIT_AI_PLAN=10/minute
 RATE_LIMIT_REMEDIATION_EXEC=5/minute
 ```
+
+See [Authentication Email Delivery](email-delivery.md) for Apps Script setup, security limits, SMTP variable names, and manual inbox verification. `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, and `SMTP_USE_TLS` shown in older deployment notes are not application settings; use `EMAIL_FROM` and `SMTP_TLS`.
 
 ---
 

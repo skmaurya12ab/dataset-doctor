@@ -6,6 +6,7 @@ from app.models.analysis import AnalysisRun, QualityIssue, AnalysisStatus
 from app.models.ai import AIReport, FindingExplanationRecord
 from app.models.remediation import RemediationExecution, RemediationExecutionStatus
 from app.models.user import User, UserSession, EmailVerificationToken, PasswordResetToken
+from app.models.email_delivery import EmailDeliveryAttempt, EmailDeliveryCounter
 
 __all__ = [
     "Base",
@@ -14,6 +15,8 @@ __all__ = [
     "UserSession",
     "EmailVerificationToken",
     "PasswordResetToken",
+    "EmailDeliveryAttempt",
+    "EmailDeliveryCounter",
     "Dataset",
     "DatasetVersion",
     "AnalysisRun",

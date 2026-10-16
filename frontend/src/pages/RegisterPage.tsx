@@ -11,10 +11,12 @@ export const RegisterPage: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isSuccess, setIsSuccess] = useState(false)
+  const [canResendVerification, setCanResendVerification] = useState(false)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setCanResendVerification(false)
 
     if (password.length < 8) {
       setError('Password must be at least 8 characters long.')
@@ -32,7 +34,8 @@ export const RegisterPage: React.FC = () => {
       await register({ email, password })
       setIsSuccess(true)
     } catch (err: unknown) {
-      const errObj = err as { response?: { data?: { detail?: string } }; message?: string }
+      const errObj = err as { response?: { status?: number; data?: { detail?: string } }; message?: string }
+      setCanResendVerification(errObj.response?.status === 503)
       setError(
         errObj.response?.data?.detail ||
           errObj.message ||
@@ -71,6 +74,13 @@ export const RegisterPage: React.FC = () => {
               </p>
               <div className="pt-4">
                 <Link
+                  to="/verify-email"
+                  state={{ email }}
+                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 mb-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium rounded-xl transition-all text-sm"
+                >
+                  <span>Resend Verification Email</span>
+                </Link>
+                <Link
                   to="/login"
                   className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all text-sm"
                 >
@@ -89,6 +99,15 @@ export const RegisterPage: React.FC = () => {
                   <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-rose-400" />
                   <span>{error}</span>
                 </div>
+              )}
+              {canResendVerification && (
+                <Link
+                  to="/verify-email"
+                  state={{ email }}
+                  className="mb-6 inline-flex text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Request a verification email later
+                </Link>
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">

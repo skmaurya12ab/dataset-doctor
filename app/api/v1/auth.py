@@ -202,7 +202,10 @@ async def forgot_password(
 
     await auth_service.request_password_reset(db=db, email=req.email)
     return MessageResponse(
-        message="If an account exists with this email address, password reset instructions have been sent."
+        message=(
+            "If an account exists with this email address, the request has been received. "
+            "Check your inbox later; if no message arrives, try again later."
+        )
     )
 
 
@@ -246,7 +249,10 @@ async def resend_verification(
 
     await auth_service.resend_verification_email(db=db, email=req.email)
     return MessageResponse(
-        message="If an account with this email address requires verification, a fresh link has been sent."
+        message=(
+            "If an account with this email address requires verification, you can request a fresh link. "
+            "If no message arrives, try again later."
+        )
     )
 
 

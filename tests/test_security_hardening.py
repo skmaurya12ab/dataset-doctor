@@ -174,4 +174,4 @@ async def test_resend_verification_endpoint(
             json={"email": "nonexistent@example.com"},
         )
         assert resp.status_code == 200
-        assert "fresh link has been sent" in resp.json()["message"]
+        assert "request a fresh link" in resp.json()["message"]

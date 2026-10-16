@@ -19,7 +19,7 @@ export const ForgotPasswordPage: React.FC = () => {
       const res = await api.forgotPassword({ email })
       setMessage(
         res.message ||
-          'If an account exists with this email address, password reset instructions have been sent.',
+          'If an account exists with this email address, the request has been received. Check your inbox later; if no message arrives, try again later.',
       )
     } catch (err: unknown) {
       const errObj = err as { response?: { data?: { detail?: string } }; message?: string }
@@ -52,7 +52,7 @@ export const ForgotPasswordPage: React.FC = () => {
               <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center border border-emerald-500/20">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
-              <h2 className="text-xl font-bold text-white">Instructions Sent</h2>
+              <h2 className="text-xl font-bold text-white">Request Received</h2>
               <p className="text-sm text-slate-300 leading-relaxed">{message}</p>
               <div className="pt-4 flex flex-col gap-2">
                 <Link
@@ -83,7 +83,7 @@ export const ForgotPasswordPage: React.FC = () => {
               )}
 
               <p className="text-sm text-slate-300 mb-6 leading-relaxed">
-                Enter your account email address. If an account is associated with this email, we'll dispatch a single-use secure reset token.
+                Enter your account email address. If an account exists, we'll try to send a single-use password reset link.
               </p>
 
               <form onSubmit={handleSubmit} className="space-y-4">

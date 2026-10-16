@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -160,6 +160,10 @@ class Settings(BaseSettings):
         gt=0,
         description="Validity window for password reset tokens in hours",
     )
+    application_base_url: str = Field(
+        default="http://localhost:5173",
+        description="Public frontend origin used to build verification and password-reset links",
+    )
     allowed_origins: str = Field(
         default="http://localhost:5173,http://localhost:8000,http://127.0.0.1:5173,http://127.0.0.1:8000",
         description="Comma-separated list of allowed CORS origins",
@@ -213,6 +217,22 @@ class Settings(BaseSettings):
     )
 
     # Email & Notification Settings
+    email_provider: Literal["mock", "smtp", "apps_script"] = Field(
+        default="mock",
+        description="Explicit email provider: mock (development/tests only), smtp, or apps_script",
+    )
+    email_daily_send_cap: int = Field(
+        default=20,
+        ge=1,
+        le=80,
+        description="Persistent UTC-day cap on application email dispatch attempts",
+    )
+    email_recipient_cooldown_seconds: int = Field(
+        default=900,
+        ge=60,
+        le=86400,
+        description="Minimum interval between auth emails to the same account",
+    )
     smtp_host: Optional[str] = Field(
         default=None,
         description="SMTP host for delivering verification and reset emails",
@@ -236,6 +256,20 @@ class Settings(BaseSettings):
     email_from: str = Field(
         default="noreply@datasetdoctor.local",
         description="From address for system emails",
+    )
+    apps_script_url: Optional[str] = Field(
+        default=None,
+        description="Deployed Apps Script web-app /exec URL; backend-only secret configuration",
+    )
+    apps_script_hmac_secret: Optional[SecretStr] = Field(
+        default=None,
+        description="High-entropy shared HMAC-SHA-256 key; backend-only secret configuration",
+    )
+    apps_script_timeout_seconds: float = Field(
+        default=12.0,
+        gt=0.0,
+        le=30.0,
+        description="Maximum time the async backend waits for the HTTPS Apps Script relay call",
     )
 
     @field_validator("log_level")
@@ -318,21 +352,74 @@ class Settings(BaseSettings):
                     "Provide valid S3-compatible configuration."
                 )
 
-    def validate_production_smtp(self) -> None:
-        """Ensure SMTP is configured if email verification is mandatory in production.
+    def validate_email_configuration(self) -> None:
+        """Fail closed when a selected delivery provider is missing or unsafe."""
+        from urllib.parse import urlsplit
 
-        Fails with clear configuration errors without logging password secrets.
-        """
-        if self.is_production and self.require_email_verification:
+        app_url = urlsplit(self.application_base_url)
+        if (
+            len(self.application_base_url) > 2048
+            or not self.application_base_url.isascii()
+            or app_url.scheme not in {"http", "https"}
+            or not app_url.hostname
+            or app_url.username
+            or app_url.password
+            or app_url.path not in {"", "/"}
+            or app_url.query
+            or app_url.fragment
+        ):
+            raise ValueError("Email configuration error: APPLICATION_BASE_URL must be an origin without credentials or path.")
+
+        if self.is_production and self.email_provider == "mock":
+            raise ValueError(
+                "Production configuration error: EMAIL_PROVIDER=mock is not allowed. "
+                "Select a configured smtp or apps_script provider."
+            )
+
+        if self.email_provider == "smtp":
+            from app.core.security import validate_email_format
+
             if not self.smtp_host:
-                raise ValueError(
-                    "Production configuration error: 'require_email_verification' is enabled "
-                    "but 'smtp_host' is not configured. Provide SMTP_HOST and credentials."
-                )
-            if not self.email_from:
-                raise ValueError(
-                    "Production configuration error: 'email_from' sender address must be provided."
-                )
+                raise ValueError("Email configuration error: SMTP_PROVIDER requires SMTP_HOST.")
+            if bool(self.smtp_user) != bool(self.smtp_password):
+                raise ValueError("Email configuration error: SMTP_USER and SMTP_PASSWORD must be set together.")
+            if not self.smtp_tls:
+                raise ValueError("Email configuration error: SMTP_TLS must be enabled for authentication email.")
+            if (
+                not self.email_from
+                or not validate_email_format(self.email_from.strip())
+                or (self.is_production and self.email_from.strip().lower().endswith(".local"))
+            ):
+                raise ValueError("Email configuration error: EMAIL_FROM must be a verified sender address.")
+
+        if self.email_provider == "apps_script":
+            if not self.apps_script_url:
+                raise ValueError("Email configuration error: APPS_SCRIPT_URL is required for apps_script.")
+            endpoint = urlsplit(self.apps_script_url)
+            if (
+                len(self.apps_script_url) > 2048
+                or not self.apps_script_url.isascii()
+                or endpoint.scheme != "https"
+                or endpoint.hostname != "script.google.com"
+                or endpoint.port not in {None, 443}
+                or not endpoint.path.startswith("/macros/s/")
+                or not endpoint.path.endswith("/exec")
+                or endpoint.username
+                or endpoint.password
+                or endpoint.query
+                or endpoint.fragment
+            ):
+                raise ValueError("Email configuration error: APPS_SCRIPT_URL must be a deployed HTTPS /exec URL.")
+            if not self.apps_script_hmac_secret:
+                raise ValueError("Email configuration error: APPS_SCRIPT_HMAC_SECRET is required for apps_script.")
+            if len(self.apps_script_hmac_secret.get_secret_value().encode("utf-8")) < 32:
+                raise ValueError("Email configuration error: APPS_SCRIPT_HMAC_SECRET must contain at least 32 bytes.")
+            if app_url.scheme != "https":
+                raise ValueError("Email configuration error: APPLICATION_BASE_URL must be an HTTPS origin in apps_script mode.")
+
+        if self.is_production and self.email_provider != "mock":
+            if app_url.scheme != "https":
+                raise ValueError("Production configuration error: APPLICATION_BASE_URL must be an HTTPS origin.")
 
 
 @lru_cache

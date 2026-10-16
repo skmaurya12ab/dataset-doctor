@@ -94,6 +94,13 @@ class AuthenticationException(DatasetDoctorException):
         super().__init__(details, status_code=401)
 
 
+class EmailDeliveryException(DatasetDoctorException):
+    """A persisted account could not be completed because required email was not delivered."""
+
+    def __init__(self, details: str = "Email delivery is temporarily unavailable. Please request another verification email later."):
+        super().__init__(details, status_code=503)
+
+
 class ForbiddenException(DatasetDoctorException):
     """Raised when an authenticated caller is forbidden from accessing a specific resource."""
 

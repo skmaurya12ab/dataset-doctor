@@ -8,12 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
-from app.core.exceptions import AuthenticationException, ValidationException
+from app.core.exceptions import AuthenticationException, EmailDeliveryException, ValidationException
 from app.core.logging import get_logger
 from app.core.security import generate_token, hash_password, hash_token, normalize_email, verify_password
 from app.models.user import EmailVerificationToken, PasswordResetToken, User, UserSession
 from app.schemas.auth import UserLoginRequest, UserRegisterRequest
 from app.services.email_service import get_email_service
+from app.services.email_limits import reserve_email_delivery
 
 logger = get_logger(__name__)
 
@@ -62,10 +63,19 @@ class AuthService:
         await db.commit()
 
         # 4. Dispatch verification email
-        email_svc = get_email_service()
-        await email_svc.send_verification_email(clean_email, raw_verify_token)
+        if await self._reserve_email(db, user.id, "verification"):
+            delivered = await get_email_service().send_verification_email(clean_email, raw_verify_token)
+        else:
+            delivered = False
+        if not delivered:
+            # The account remains persisted so the user can use resend after cooldown.
+            await db.delete(token_record)
+            await db.commit()
+            if settings.require_email_verification:
+                logger.warning("Registration email delivery did not complete")
+                raise EmailDeliveryException()
 
-        logger.info("Registered new user %s (id: %s)", clean_email, user.id)
+        logger.info("Registered new user (id: %s)", user.id)
         return user
 
     async def authenticate_user(self, db: AsyncSession, req: UserLoginRequest) -> User:
@@ -208,14 +218,6 @@ class AuthService:
         token_hash = hash_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.email_verification_token_expire_hours)
 
-        # Invalidate previous unused verification tokens
-        await db.execute(
-            delete(EmailVerificationToken).where(
-                EmailVerificationToken.user_id == user.id,
-                EmailVerificationToken.used_at.is_(None),
-            )
-        )
-
         record = EmailVerificationToken(
             id=uuid.uuid4(),
             user_id=user.id,
@@ -225,9 +227,24 @@ class AuthService:
         db.add(record)
         await db.commit()
 
-        email_svc = get_email_service()
-        await email_svc.send_verification_email(clean_email, raw_token)
-        logger.info("Dispatched fresh email verification token for %s", clean_email)
+        if not await self._reserve_email(db, user.id, "verification"):
+            delivered = False
+        else:
+            delivered = await get_email_service().send_verification_email(clean_email, raw_token)
+        if not delivered:
+            await db.delete(record)
+            await db.commit()
+            logger.warning("Verification email delivery did not complete")
+            return False
+
+        await db.execute(
+            delete(EmailVerificationToken).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+                EmailVerificationToken.id != record.id,
+            )
+        )
+        await db.commit()
         return True
 
     async def request_password_reset(self, db: AsyncSession, email: str) -> bool:
@@ -249,14 +266,6 @@ class AuthService:
         token_hash = hash_token(raw_token)
         expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.password_reset_token_expire_hours)
 
-        # Invalidate previous unused reset tokens
-        await db.execute(
-            delete(PasswordResetToken).where(
-                PasswordResetToken.user_id == user.id,
-                PasswordResetToken.used_at.is_(None),
-            )
-        )
-
         reset_token = PasswordResetToken(
             id=uuid.uuid4(),
             user_id=user.id,
@@ -266,11 +275,34 @@ class AuthService:
         db.add(reset_token)
         await db.commit()
 
-        email_svc = get_email_service()
-        await email_svc.send_password_reset_email(clean_email, raw_token)
+        if not await self._reserve_email(db, user.id, "password_reset"):
+            delivered = False
+        else:
+            delivered = await get_email_service().send_password_reset_email(clean_email, raw_token)
+        if not delivered:
+            await db.delete(reset_token)
+            await db.commit()
+            logger.warning("Password-reset email delivery did not complete")
+            return False
 
-        logger.info("Dispatched password reset token for user %s", clean_email)
+        await db.execute(
+            delete(PasswordResetToken).where(
+                PasswordResetToken.user_id == user.id,
+                PasswordResetToken.used_at.is_(None),
+                PasswordResetToken.id != reset_token.id,
+            )
+        )
+        await db.commit()
         return True
+
+    async def _reserve_email(self, db: AsyncSession, user_id: uuid.UUID, message_type: str) -> bool:
+        """Reserve global and per-account limits before contacting a provider."""
+        return await reserve_email_delivery(
+            db,
+            user_id=user_id,
+            message_type=message_type,
+            settings=get_settings(),
+        )
 
     async def reset_password(self, db: AsyncSession, token_str: str, new_password: str) -> bool:
         """Validate reset token, update password hash, and revoke all active sessions."""

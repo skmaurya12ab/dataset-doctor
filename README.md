@@ -2,7 +2,7 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 3B1 complete — Persistent S3-compatible object storage integrated & verified across 318 backend tests.`
+> **Status:** `Phase 3B3 email-delivery code implemented; Apps Script account setup and live inbox smoke test remain manual.`
 
 ### Project Roadmap Status
 - **Phase 0 — Foundations & Core Abstractions**: ✅
@@ -14,6 +14,7 @@ Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed
 - **Phase 6 — Interactive Quality & Remediation Dashboard**: ✅
 - **Phase 7 — Hardening, Automated Testing & Documentation**: ✅
 - **Phase 3B1 — S3-Compatible Persistent Object Storage (Backblaze B2)**: ✅
+- **Phase 3B3 — Secure Apps Script Email Relay**: Code and mocked tests implemented; no relay deployment or real inbox delivery has been verified.
 
 ---
 
@@ -185,13 +186,15 @@ Access the service:
 
 ## Automated Testing & Verification
 
+Authentication email provider configuration and the Google Apps Script relay are documented in [docs/email-delivery.md](docs/email-delivery.md).
+
 Dataset Doctor features comprehensive automated test suites across both backend and frontend layers:
 
 ```bash
-# 1. Run full backend test suite (325+ tests)
+# 1. Run full backend test suite
 pytest -v
 
-# 2. Run frontend unit and integration tests (54+ tests)
+# 2. Run frontend unit and integration tests
 cd frontend
 npm run test
 

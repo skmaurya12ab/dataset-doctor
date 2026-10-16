@@ -38,9 +38,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(level=settings.log_level)
     logger.info("Starting %s in [%s] mode", settings.app_name, settings.environment)
 
-    # Validate production SMTP configuration
+    # Validate the explicitly selected email provider; production never falls back to mock.
     try:
-        settings.validate_production_smtp()
+        settings.validate_email_configuration()
     except ValueError as val_err:
         logger.critical("Fatal production configuration error: %s", val_err)
         raise

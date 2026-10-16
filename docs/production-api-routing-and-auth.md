@@ -150,12 +150,16 @@ MAX_DATASETS_PER_USER="20"
 MAX_CUMULATIVE_STORAGE_MB_PER_USER="500"
 MAX_CONCURRENT_ANALYSIS_JOBS_PER_USER="2"
 
-# Email Verification (Deferred to Phase 3B3)
-REQUIRE_EMAIL_VERIFICATION="false"
+# Email Verification
+REQUIRE_EMAIL_VERIFICATION="true"
+EMAIL_PROVIDER="apps_script"
+APPLICATION_BASE_URL="https://YOUR_FRONTEND_SUBDOMAIN.vercel.app"
+APPS_SCRIPT_URL="https://script.google.com/macros/s/DEPLOYMENT_ID/exec"
+APPS_SCRIPT_HMAC_SECRET="STORE_A_32_BYTE_RANDOM_SECRET_SERVER_SIDE"
 ```
 
 > [!NOTE]
-> **Email Delivery Notice**: Real production email delivery remains unresolved until a verified SMTP or transactional email provider (e.g. SendGrid, Resend, Brevo, AWS SES) is configured in a later phase. Until then, `REQUIRE_EMAIL_VERIFICATION` should remain `false`.
+> **Email Delivery Notice**: Configure and manually smoke-test the Apps Script relay before deploying these values. Production rejects `EMAIL_PROVIDER=mock`; if no real provider is configured, keep verification required and do not start the deployment. See [Authentication Email Delivery](email-delivery.md) for the setup and operational limits.
 
 ### Vercel Frontend Configuration
 1. Connect repository to Vercel.

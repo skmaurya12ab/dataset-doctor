@@ -1,14 +1,20 @@
 import React, { useEffect, useState } from 'react'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowRight, CheckCircle2, KeyRound } from 'lucide-react'
 import { api } from '../services/api'
 
 export const VerifyEmailPage: React.FC = () => {
+  const location = useLocation()
   const [searchParams] = useSearchParams()
   const initialToken = searchParams.get('token') || ''
+  const navigationState = location.state as { email?: unknown } | null
+  const initialEmail = typeof navigationState?.email === 'string' ? navigationState.email : ''
   const [token, setToken] = useState(initialToken)
+  const [resendEmail, setResendEmail] = useState(initialEmail)
   const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle')
   const [message, setMessage] = useState<string | null>(null)
+  const [resendMessage, setResendMessage] = useState<string | null>(null)
+  const [isResending, setIsResending] = useState(false)
 
   const verify = async (tokenToUse: string) => {
     if (!tokenToUse) return
@@ -38,6 +44,23 @@ export const VerifyEmailPage: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     verify(token)
+  }
+
+  const handleResend = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsResending(true)
+    setResendMessage(null)
+    try {
+      const res = await api.resendVerification(resendEmail)
+      setResendMessage(res.message || 'If an account needs verification, the request has been received. Check your inbox later.')
+    } catch (err: unknown) {
+      const errObj = err as { response?: { data?: { detail?: string } }; message?: string }
+      setResendMessage(
+        errObj.response?.data?.detail || errObj.message || 'The request could not be processed. Try again later.',
+      )
+    } finally {
+      setIsResending(false)
+    }
   }
 
   return (
@@ -90,7 +113,7 @@ export const VerifyEmailPage: React.FC = () => {
                 <span>{message}</span>
               </div>
               <p className="text-xs text-slate-400 text-center">
-                You can enter a token manually below or request a new one from login.
+                Enter a token manually below or request a new verification email.
               </p>
             </div>
           )}
@@ -124,6 +147,37 @@ export const VerifyEmailPage: React.FC = () => {
                 <span>Verify Token</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
+            </form>
+          )}
+
+          {status !== 'success' && (
+            <form onSubmit={handleResend} className="mt-6 border-t border-slate-800 pt-5 space-y-3">
+              <h2 className="text-sm font-semibold text-slate-200">Need a new verification email?</h2>
+              <div>
+                <label htmlFor="resend-email" className="block text-sm font-medium text-slate-300 mb-1.5">
+                  Account Email
+                </label>
+                <input
+                  id="resend-email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full px-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isResending}
+                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isResending ? 'Requesting…' : 'Resend Verification Email'}
+              </button>
+              {resendMessage && (
+                <p role="status" className="text-xs text-slate-300 text-center">{resendMessage}</p>
+              )}
             </form>
           )}
 

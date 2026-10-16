@@ -207,7 +207,7 @@ async def test_forgot_and_reset_password_flow(
         json={"email": "reset_api@example.com"},
     )
     assert forgot_res.status_code == 200
-    assert "password reset instructions" in forgot_res.json()["message"]
+    assert "request has been received" in forgot_res.json()["message"]
 
     # Also returns 200 for nonexistent email (anti-enumeration)
     forgot_fake = await client.post(
@@ -215,6 +215,7 @@ async def test_forgot_and_reset_password_flow(
         json={"email": "nonexistent_reset@example.com"},
     )
     assert forgot_fake.status_code == 200
+    assert forgot_fake.json()["message"] == forgot_res.json()["message"]
 
     # Overwrite reset token for user to test
     raw_token = generate_token(32)
@@ -236,6 +237,154 @@ async def test_forgot_and_reset_password_flow(
         json={"email": "reset_api@example.com", "password": "BrandNewPassword123!"},
     )
     assert login_new.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_registration_delivery_failure_does_not_report_success(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Persisted account can recover through resend after a failed first dispatch."""
+    from sqlalchemy import select
+    from app.core.config import Settings
+    from app.services import auth_service as auth_service_module
+
+    class FailedEmailService:
+        async def send_verification_email(self, *_args):
+            return False
+
+        async def send_password_reset_email(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        auth_service_module,
+        "get_settings",
+        lambda: Settings(environment="testing", require_email_verification=True),
+    )
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: FailedEmailService())
+
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/register",
+        json={"email": "delivery-failed@example.com", "password": "Password123!"},
+    )
+    assert response.status_code == 503
+    assert "temporarily unavailable" in response.json()["detail"]
+    user = (await test_db_session.execute(select(User).where(User.email == "delivery-failed@example.com"))).scalar_one()
+    assert user.is_verified is False
+    tokens = (
+        await test_db_session.execute(
+            select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
+        )
+    ).scalars().all()
+    assert tokens == []
+
+
+@pytest.mark.asyncio
+async def test_resend_failure_keeps_previous_token_and_generic_response(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed resend does not invalidate a previously delivered verification token."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    from app.core.config import Settings
+    from app.core.security import hash_token
+    from app.services import auth_service as auth_service_module
+
+    class FailedEmailService:
+        async def send_verification_email(self, *_args):
+            return False
+
+        async def send_password_reset_email(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        auth_service_module,
+        "get_settings",
+        lambda: Settings(environment="testing", email_recipient_cooldown_seconds=60),
+    )
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: FailedEmailService())
+    user = User(
+        email="resend-failed@example.com",
+        hashed_password="unused-test-hash",
+        is_active=True,
+        is_verified=False,
+        role="user",
+    )
+    test_db_session.add(user)
+    await test_db_session.flush()
+    old_token = EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hash_token("old-delivered-token"),
+        expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+    )
+    test_db_session.add(old_token)
+    await test_db_session.commit()
+
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/resend-verification", json={"email": user.email}
+    )
+    assert response.status_code == 200
+    assert "If an account" in response.json()["message"]
+    tokens = (
+        await test_db_session.execute(
+            select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
+        )
+    ).scalars().all()
+    assert len(tokens) == 1
+    assert tokens[0].token_hash == hash_token("old-delivered-token")
+
+
+@pytest.mark.asyncio
+async def test_password_reset_delivery_failure_keeps_generic_response(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Provider failure is not disclosed through a password-reset account oracle."""
+    from sqlalchemy import select
+    from app.core.config import Settings
+    from app.services import auth_service as auth_service_module
+
+    class FailedEmailService:
+        async def send_verification_email(self, *_args):
+            return False
+
+        async def send_password_reset_email(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        auth_service_module,
+        "get_settings",
+        lambda: Settings(environment="testing"),
+    )
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: FailedEmailService())
+    user = User(
+        email="reset-failed@example.com",
+        hashed_password="unused-test-hash",
+        is_active=True,
+        is_verified=True,
+        role="user",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+
+    known = await unauthenticated_async_client.post(
+        "/api/v1/auth/forgot-password", json={"email": user.email}
+    )
+    unknown = await unauthenticated_async_client.post(
+        "/api/v1/auth/forgot-password", json={"email": "missing-reset@example.com"}
+    )
+    assert known.status_code == unknown.status_code == 200
+    assert known.json()["message"] == unknown.json()["message"]
+    assert "sent" not in known.json()["message"].lower()
+    assert (
+        await test_db_session.execute(
+            select(PasswordResetToken).where(PasswordResetToken.user_id == user.id)
+        )
+    ).scalars().all() == []
 
 
 @pytest.mark.asyncio
