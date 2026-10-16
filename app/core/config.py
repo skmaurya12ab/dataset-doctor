@@ -3,7 +3,7 @@
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -33,14 +33,47 @@ class Settings(BaseSettings):
         description="Async SQLAlchemy database connection string",
     )
 
-    # File Ingestion & Storage
+    # File Ingestion & Storage Settings
+    storage_backend: Literal["local", "s3"] = Field(
+        default="local",
+        description="Storage backend engine: 'local' (filesystem) or 's3' (S3-compatible object storage)",
+    )
     upload_dir: Path = Field(
         default=Path("uploads"),
-        description="Directory for uploaded datasets and artifacts",
+        description="Directory for uploaded datasets, staging files, and local cache",
     )
     max_upload_size_mb: int = Field(
         default=100,
         description="Maximum allowed upload file size in megabytes",
+    )
+
+    # S3-Compatible Object Storage Settings (Active when storage_backend='s3')
+    s3_endpoint_url: Optional[str] = Field(
+        default=None,
+        description="S3 endpoint URL (e.g. Backblaze B2, MinIO, AWS S3)",
+    )
+    s3_bucket_name: Optional[str] = Field(
+        default=None,
+        description="S3 bucket name for dataset persistence",
+    )
+    s3_region: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("s3_region", "s3_region_name", "aws_region", "aws_default_region"),
+        description="S3 region name",
+    )
+    s3_access_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("s3_access_key", "s3_access_key_id", "aws_access_key_id"),
+        description="S3 Access Key ID / keyId",
+    )
+    s3_secret_key: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("s3_secret_key", "s3_secret_access_key", "aws_secret_access_key"),
+        description="S3 Secret Access Key / applicationKey",
+    )
+    s3_signature_version: str = Field(
+        default="s3v4",
+        description="AWS signature version for S3 requests",
     )
 
     # AI Interpretation Provider Settings
@@ -250,8 +283,40 @@ class Settings(BaseSettings):
         return origins
 
     @property
+    def is_s3_storage(self) -> bool:
+        return self.storage_backend == "s3"
+
+    @property
     def parsed_trusted_proxies(self) -> list[str]:
-        return [proxy.strip() for proxy in self.trusted_proxies.split(",") if proxy.strip()]
+        proxies = [proxy.strip() for proxy in self.trusted_proxies.split(",") if proxy.strip()]
+        if self.is_production and any(p in {"0.0.0.0/0", "*", "0.0.0.0"} for p in proxies):
+            raise ValueError(
+                "Insecure trusted proxy configuration: Wildcard or '0.0.0.0/0' is forbidden in production "
+                "because it permits arbitrary client-supplied forwarded IP headers."
+            )
+        return proxies
+
+    def validate_storage_configuration(self) -> None:
+        """Validate storage backend configuration settings.
+
+        Fails with clear, actionable errors without logging secrets.
+        """
+        if self.storage_backend == "s3":
+            missing = []
+            if not self.s3_endpoint_url:
+                missing.append("s3_endpoint_url (S3_ENDPOINT_URL)")
+            if not self.s3_bucket_name:
+                missing.append("s3_bucket_name (S3_BUCKET_NAME)")
+            if not self.s3_access_key:
+                missing.append("s3_access_key (S3_ACCESS_KEY / S3_ACCESS_KEY_ID)")
+            if not self.s3_secret_key:
+                missing.append("s3_secret_key (S3_SECRET_KEY / S3_SECRET_ACCESS_KEY)")
+            if missing:
+                raise ValueError(
+                    f"Storage configuration error: S3 backend is enabled (storage_backend='s3'), "
+                    f"but the following required parameters are missing: {', '.join(missing)}. "
+                    "Provide valid S3-compatible configuration."
+                )
 
     def validate_production_smtp(self) -> None:
         """Ensure SMTP is configured if email verification is mandatory in production.

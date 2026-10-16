@@ -155,8 +155,12 @@ class RemediationService:
             source_version.version_number,
         )
 
-        # 8. Load source canonical Parquet (Read-Only)
-        parquet_path = self.storage.get_parquet_path(dataset_id, source_version.version_number)
+        # 8. Load source canonical Parquet (Read-Only, materialized from persistent storage if ephemeral)
+        try:
+            parquet_path = self.storage.ensure_local_parquet(dataset_id, source_version.version_number)
+        except Exception:
+            parquet_path = self.storage.get_parquet_path(dataset_id, source_version.version_number)
+
         if not parquet_path.exists():
             execution.status = RemediationExecutionStatus.FAILED.value
             execution.error_message = f"Source canonical Parquet file not found at {parquet_path}"
@@ -256,6 +260,13 @@ class RemediationService:
             # Atomic move into final canonical location
             temp_parquet_path.replace(target_parquet_path)
             temp_parquet_path = None  # moved successfully
+
+            # Persist to active storage backend (uploads to S3 if configured)
+            self.storage.persist_canonical_parquet_file(
+                dataset_id=dataset_id,
+                version_number=new_version_number,
+                local_parquet_path=target_parquet_path,
+            )
 
 
             # 14. Build structured change summary and raw schema

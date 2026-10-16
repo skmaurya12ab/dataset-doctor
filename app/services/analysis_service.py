@@ -66,18 +66,24 @@ async def _execute_analysis_coro(
             await active_session.commit()
             logger.info("Analysis run %s marked as RUNNING", run_id)
 
-            # 3. Locate and load canonical Parquet file
+            # 3. Locate and load canonical Parquet file (ensures materialization from persistent storage if ephemeral)
             parquet_path = None
-            if version.storage_path:
-                stored_p = Path(version.storage_path)
-                if stored_p.exists():
-                    parquet_path = stored_p
+            storage = FileStorageService()
+            try:
+                parquet_path = storage.ensure_local_parquet(version.dataset_id, version.version_number)
+            except Exception as loc_exc:
+                logger.warning(
+                    "Direct materialization failed for dataset %s v%d: %s. Falling back to storage_path check.",
+                    version.dataset_id,
+                    version.version_number,
+                    loc_exc,
+                )
+                if version.storage_path:
+                    stored_p = Path(version.storage_path)
+                    if stored_p.exists():
+                        parquet_path = stored_p
 
             if parquet_path is None or not parquet_path.exists():
-                storage = FileStorageService()
-                parquet_path = storage.get_parquet_path(version.dataset_id, version.version_number)
-
-            if not parquet_path.exists():
                 err_msg = f"Canonical Parquet file missing for version {version.version_number} at {parquet_path}"
                 logger.error(err_msg)
                 run.status = AnalysisStatus.FAILED.value

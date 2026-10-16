@@ -39,13 +39,12 @@ async def v1_readiness_check(
         status_code = 503
 
     try:
-        if settings.upload_dir.exists() and settings.upload_dir.is_dir():
-            test_file = settings.upload_dir / f".ready_test_{uuid.uuid4().hex}"
-            test_file.touch()
-            test_file.unlink()
+        from app.api.deps import get_storage_service
+        storage = get_storage_service()
+        if await storage.check_health():
             checks["storage"] = "available"
         else:
-            checks["storage"] = "missing_directory"
+            checks["storage"] = "inaccessible"
             status_code = 503
     except Exception:
         checks["storage"] = "inaccessible"

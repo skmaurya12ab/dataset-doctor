@@ -2,7 +2,7 @@
 
 Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed to inspect raw datasets deterministically using Python, detect structural, statistical, and modeling issues, compute an explainable **ML Readiness Heuristic**, and synthesize an actionable cleaning and pipeline-preparation plan via an AI domain interpreter.
 
-> **Status:** `Phase 7 complete — Hardening, automated testing across 297 tests, security boundaries, and documentation finalized.`
+> **Status:** `Phase 3B1 complete — Persistent S3-compatible object storage integrated & verified across 318 backend tests.`
 
 ### Project Roadmap Status
 - **Phase 0 — Foundations & Core Abstractions**: ✅
@@ -13,6 +13,7 @@ Dataset Doctor is an AI-assisted data quality and ML-readiness platform designed
 - **Phase 5 — Deterministic Remediation Execution, Versioning & Comparison**: ✅
 - **Phase 6 — Interactive Quality & Remediation Dashboard**: ✅
 - **Phase 7 — Hardening, Automated Testing & Documentation**: ✅
+- **Phase 3B1 — S3-Compatible Persistent Object Storage (Backblaze B2)**: ✅
 
 ---
 
@@ -114,8 +115,13 @@ Dataset Doctor decouples deterministic data analysis from AI interpretation:
 | `ENVIRONMENT` | `"development"` | Runtime environment (`development`, `staging`, `production`, `testing`) |
 | `DEBUG` | `false` | Enable debug logs & SQL echoing |
 | `DATABASE_URL` | `postgresql+asyncpg://postgres:postgres@localhost:5432/dataset_doctor` | Async PostgreSQL connection string |
-| `UPLOAD_DIR` | `"uploads"` | Directory for dataset storage |
+| `STORAGE_BACKEND` | `"local"` | Storage engine: `"local"` (filesystem) or `"s3"` (persistent object storage) |
+| `UPLOAD_DIR` | `"uploads"` | Local dataset storage directory (and cache for S3 mode) |
 | `MAX_UPLOAD_SIZE_MB`| `100` | Maximum allowed file upload size in MB |
+| `S3_ENDPOINT_URL` | `None` | S3-compatible endpoint (e.g. Backblaze B2, AWS S3) |
+| `S3_BUCKET_NAME` | `None` | S3 bucket name for dataset storage |
+| `S3_ACCESS_KEY` | `None` | S3 Access Key ID / keyId |
+| `S3_SECRET_KEY` | `None` | S3 Secret Access Key / applicationKey |
 | `LOG_LEVEL` | `"INFO"` | Logging verbosity (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `MAX_WORKER_THREADS`| `4` | Worker threads for analysis job runner |
 | `OPENAI_API_KEY` | `None` | OpenAI API key for structured interpretation |

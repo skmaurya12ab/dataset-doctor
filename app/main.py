@@ -43,6 +43,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.critical("Fatal production configuration error: %s", val_err)
         raise
 
+    # Validate storage configuration
+    try:
+        settings.validate_storage_configuration()
+    except ValueError as val_err:
+        logger.critical("Fatal storage configuration error: %s", val_err)
+        raise
+
     # Ensure upload directory exists
     settings.upload_dir.mkdir(parents=True, exist_ok=True)
     logger.info("Upload directory confirmed at: %s", settings.upload_dir.resolve())
@@ -138,15 +145,14 @@ def create_application() -> FastAPI:
             checks["database"] = "unavailable"
             status_code = 503
 
-        # 2. Storage writeability check
+        # 2. Storage writeability / connectivity check
         try:
-            if settings.upload_dir.exists() and settings.upload_dir.is_dir():
-                test_file = settings.upload_dir / f".ready_test_{uuid.uuid4().hex}"
-                test_file.touch()
-                test_file.unlink()
+            from app.api.deps import get_storage_service
+            storage = get_storage_service()
+            if await storage.check_health():
                 checks["storage"] = "available"
             else:
-                checks["storage"] = "missing_directory"
+                checks["storage"] = "inaccessible"
                 status_code = 503
         except Exception as exc:
             logger.error("Readiness check storage failure: %s", exc)
