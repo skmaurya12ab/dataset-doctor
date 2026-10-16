@@ -1,6 +1,14 @@
 import '@testing-library/jest-dom'
 import { vi } from 'vitest'
 import React from 'react'
+import type { TestingLibraryMatchers } from '@testing-library/jest-dom/matchers'
+
+declare module 'vitest' {
+  interface Assertion<R extends void | Promise<void> = void, T = unknown>
+    extends TestingLibraryMatchers<any, R> {}
+  interface AsymmetricMatchersContaining
+    extends TestingLibraryMatchers<any, any> {}
+}
 
 // Mock react-plotly.js for headless JSDOM environments
 vi.mock('react-plotly.js', () => {
