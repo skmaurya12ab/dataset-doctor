@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from typing import Optional
+
 from app.api.deps import get_db, shutdown_job_runner
 from app.api.v1.router import v1_router
 from app.core.config import Settings, get_settings
@@ -73,9 +75,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info("Application shutdown completed.")
 
 
-def create_application() -> FastAPI:
+def create_application(settings: Optional[Settings] = None) -> FastAPI:
     """Factory creating and configuring the primary FastAPI application."""
-    settings = get_settings()
+    if settings is None:
+        settings = get_settings()
 
     show_docs = (not settings.is_production) or settings.enable_api_docs
 

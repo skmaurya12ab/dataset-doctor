@@ -188,10 +188,10 @@ Access the service:
 Dataset Doctor features comprehensive automated test suites across both backend and frontend layers:
 
 ```bash
-# 1. Run full backend test suite (268 tests)
+# 1. Run full backend test suite (325+ tests)
 pytest -v
 
-# 2. Run frontend unit and integration tests (29 tests)
+# 2. Run frontend unit and integration tests (54+ tests)
 cd frontend
 npm run test
 
@@ -199,6 +199,11 @@ npm run test
 npm run build
 ```
 
-For detailed architectural and hardening documentation, see:
-- [`docs/phase-7-hardening.md`](file:///docs/phase-7-hardening.md)
-- [`docs/phase-7-completion.md`](file:///docs/phase-7-completion.md)
+---
+
+## Production Deployment & Architecture
+
+For zero-cost public deployment architecture (Vercel frontend + Render backend + Neon PostgreSQL + Backblaze B2 storage), see:
+- [`docs/production-api-routing-and-auth.md`](file:///docs/production-api-routing-and-auth.md) — Production API routing, Vercel external rewrites, cookie security, CSRF, and CORS.
+- [`docs/persistent-object-storage-guide.md`](file:///docs/persistent-object-storage-guide.md) — Backblaze B2 S3-compatible persistent object storage integration.
+- [`docs/production-deployment-guide.md`](file:///docs/production-deployment-guide.md) — Full operational runbook, environment checklist, and container guide.

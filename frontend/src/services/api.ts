@@ -34,7 +34,7 @@ import type {
   MessageResponse,
 } from '../types/auth'
 
-const apiClient = axios.create({
+export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api/v1',
   withCredentials: true,
   xsrfCookieName: 'dd_csrf',
