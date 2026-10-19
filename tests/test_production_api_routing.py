@@ -1,5 +1,6 @@
 """Tests for Phase 3B2: Production API routing, CORS, trusted proxies, cookie security, and CSRF compatibility."""
 
+import logging
 import uuid
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -99,14 +100,26 @@ async def test_trusted_proxies_security() -> None:
     extracted = extract_client_ip(untrusted_req, trusted_proxies=["127.0.0.1", "::1"])
     assert extracted == "198.51.100.55"
 
-    # Trusted reverse proxy (e.g. local loopback / ingress)
+    # Trusted proxy networks are matched as IP ranges, and trusted hops are
+    # skipped from the right so a client-supplied leftmost value cannot win.
     trusted_req = MockRequest(
-        host="127.0.0.1",
-        headers={"X-Forwarded-For": "203.0.113.1, 10.0.0.1"},
+        host="10.20.1.5",
+        headers={"X-Forwarded-For": "198.51.100.77, 203.0.113.8, 10.20.2.9"},
     )
-    # Extracts the client IP from X-Forwarded-For
-    extracted_trusted = extract_client_ip(trusted_req, trusted_proxies=["127.0.0.1", "::1"])
-    assert extracted_trusted == "203.0.113.1"
+    extracted_trusted = extract_client_ip(trusted_req, trusted_proxies=["10.20.0.0/16"])
+    assert extracted_trusted == "203.0.113.8"
+
+    invalid_forwarded = MockRequest(
+        host="10.20.1.5",
+        headers={"X-Forwarded-For": "198.51.100.77, not-an-ip", "X-Real-IP": "203.0.113.8"},
+    )
+    assert extract_client_ip(invalid_forwarded, trusted_proxies=["10.20.0.0/16"]) == "10.20.1.5"
+
+    forged_real_ip = MockRequest(
+        host="198.51.100.55",
+        headers={"X-Real-IP": "203.0.113.8"},
+    )
+    assert extract_client_ip(forged_real_ip, trusted_proxies=["127.0.0.1/32"]) == "198.51.100.55"
 
 
 @pytest.mark.asyncio
@@ -120,6 +133,7 @@ async def test_cookie_security_attributes_in_production(
         database_url="sqlite+aiosqlite:///:memory:",
         allowed_origins="https://dataset-doctor.vercel.app",
         secret_key="production_secret_key_testing_12345",
+        _env_file=None,  # Keep local development settings out of this production-default test.
     )
     assert prod_settings.is_cookie_secure is True
     assert prod_settings.cookie_samesite == "lax"
@@ -290,28 +304,75 @@ async def test_proxied_authenticated_multi_user_isolation(
 
 @pytest.mark.asyncio
 async def test_health_and_readiness_probes(
-    test_db_session: AsyncSession,
+    test_settings: Settings,
     test_storage: FileStorageService,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Verify /health (liveness) and /ready (readiness) probe endpoints."""
+    """Both readiness paths report storage failures; liveness does not probe storage."""
     app = create_application()
-    app.dependency_overrides[get_db] = lambda: test_db_session
-    app.dependency_overrides[get_storage_service] = lambda: test_storage
+
+    class ReadinessDatabase:
+        async def execute(self, _statement):
+            return None
+
+    async def get_readiness_database() -> ReadinessDatabase:
+        return ReadinessDatabase()
+
+    async def get_readiness_settings() -> Settings:
+        return test_settings
+
+    app.dependency_overrides[get_db] = get_readiness_database
+    app.dependency_overrides[get_settings] = get_readiness_settings
+
+    storage_checks = []
+
+    async def storage_available() -> bool:
+        storage_checks.append(True)
+        return True
+
+    monkeypatch.setattr("app.api.deps.get_storage_service", lambda: test_storage)
+    monkeypatch.setattr(test_storage, "check_health", storage_available)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        # Liveness
-        health_resp = await client.get("/health")
-        assert health_resp.status_code == 200
-        assert health_resp.json()["status"] == "ok"
+        for health_path in ("/health", "/api/v1/health"):
+            health_resp = await client.get(health_path)
+            assert health_resp.status_code == 200
+            assert health_resp.json()["status"] == "ok"
+        assert storage_checks == []
 
-        # Readiness
-        ready_resp = await client.get("/ready")
-        assert ready_resp.status_code == 200
-        ready_data = ready_resp.json()
-        assert ready_data["status"] == "ready"
-        assert ready_data["checks"]["database"] == "connected"
-        assert ready_data["checks"]["storage"] == "available"
+        for _ in range(3):
+            for ready_path in ("/ready", "/api/v1/ready"):
+                ready_resp = await client.get(ready_path)
+                assert ready_resp.status_code == 200
+                ready_data = ready_resp.json()
+                assert ready_data["status"] == "ready"
+                assert ready_data["checks"]["database"] == "connected"
+                assert ready_data["checks"]["storage"] == "available"
+        assert len(storage_checks) == 6
+
+        async def storage_unavailable() -> bool:
+            return False
+
+        monkeypatch.setattr(test_storage, "check_health", storage_unavailable)
+        for ready_path in ("/ready", "/api/v1/ready"):
+            failed_ready = await client.get(ready_path)
+            assert failed_ready.status_code == 503
+            assert failed_ready.json()["status"] == "unready"
+            assert failed_ready.json()["checks"]["storage"] == "inaccessible"
+
+        async def storage_error() -> bool:
+            raise RuntimeError("provider response included mock-secret-key")
+
+        monkeypatch.setattr(test_storage, "check_health", storage_error)
+        with caplog.at_level(logging.ERROR):
+            for ready_path in ("/ready", "/api/v1/ready"):
+                failed_ready = await client.get(ready_path)
+                assert failed_ready.status_code == 503
+                assert failed_ready.json()["status"] == "unready"
+                assert failed_ready.json()["checks"]["storage"] == "inaccessible"
+        assert "mock-secret-key" not in caplog.text
 
 
 @pytest.mark.asyncio

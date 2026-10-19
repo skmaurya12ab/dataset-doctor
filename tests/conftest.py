@@ -9,6 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from app.api.deps import get_current_user, get_db, get_storage_service
 from app.core.config import Settings, get_settings
+
+# The test process must never inherit values from a developer's local .env file.
+Settings.model_config = {**Settings.model_config, "env_file": None}
+get_settings.cache_clear()
+
 from app.core.rate_limit import rate_limiter
 from app.main import create_application
 from app.models import Base

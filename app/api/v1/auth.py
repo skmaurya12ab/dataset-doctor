@@ -134,6 +134,7 @@ async def logout(
     db: DBSessionDep,
     auth_service: AuthService = Depends(get_auth_service),
     settings: Settings = Depends(get_settings),
+    csrf: None = Depends(verify_csrf_token),
 ) -> MessageResponse:
     """Revoke session on server and instruct browser to delete session cookies."""
     raw_token = request.cookies.get(settings.session_cookie_name)

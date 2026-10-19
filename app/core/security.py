@@ -8,6 +8,7 @@ Implements:
 """
 
 import hashlib
+import ipaddress
 import re
 import secrets
 from typing import Any, Optional
@@ -77,25 +78,50 @@ def constant_time_compare(val1: str, val2: str) -> bool:
 
 
 def extract_client_ip(request: Any, trusted_proxies: Optional[list[str]] = None) -> str:
-    """Safely extract remote client IP address respecting trusted reverse proxies.
+    """Extract a client IP only when the immediate peer is a configured proxy.
 
-    If request.client.host is not in trusted_proxies, X-Forwarded-For is ignored to
-    prevent client IP spoofing attacks against the rate limiter.
+    Forwarded addresses are parsed as IPs and walked right-to-left, skipping
+    configured proxy networks. X-Real-IP is intentionally ignored because an
+    incoming client may be able to supply it through an unverified proxy path.
     """
     if not hasattr(request, "client") or not request.client or not request.client.host:
         return "unknown"
 
-    direct_ip = request.client.host
+    direct_text = request.client.host
+    try:
+        direct_ip = ipaddress.ip_address(direct_text)
+    except ValueError:
+        return direct_text
+
     trusted = trusted_proxies if trusted_proxies is not None else ["127.0.0.1", "::1"]
 
-    if direct_ip in trusted:
-        # Inspect X-Forwarded-For header added by trusted reverse proxy
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
-            if parts:
-                return parts[0]
-        real_ip = request.headers.get("X-Real-IP")
-        if real_ip:
-            return real_ip.strip()
-    return direct_ip
+    def is_trusted(address: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        for entry in trusted:
+            try:
+                if address in ipaddress.ip_network(entry, strict=False):
+                    return True
+            except ValueError:
+                # Invalid entries never grant proxy trust.
+                continue
+        return False
+
+    if not is_trusted(direct_ip):
+        return direct_ip.compressed
+
+    forwarded = request.headers.get("X-Forwarded-For")
+    if not forwarded:
+        return direct_ip.compressed
+
+    try:
+        forwarded_ips = [
+            ipaddress.ip_address(part.strip())
+            for part in forwarded.split(",")
+            if part.strip()
+        ]
+    except ValueError:
+        return direct_ip.compressed
+
+    for address in reversed(forwarded_ips):
+        if not is_trusted(address):
+            return address.compressed
+    return direct_ip.compressed

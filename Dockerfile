@@ -41,12 +41,12 @@ RUN mkdir -p /app/uploads /app/storage && \
 USER appuser
 
 
-# Expose FastAPI HTTP port
+# Expose the documented local fallback port. Render supplies PORT at runtime; EXPOSE is metadata.
 EXPOSE 8000
 
-# Container healthcheck
+# Dockerfile HEALTHCHECK uses CMD shell form; CMD-SHELL is Compose-only syntax.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:8000/health || exit 1
+    CMD curl --fail --silent --show-error --max-time 4 "http://127.0.0.1:${PORT:-8000}/health" >/dev/null || exit 1
 
 # Launch uvicorn server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

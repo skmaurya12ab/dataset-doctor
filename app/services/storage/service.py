@@ -301,5 +301,5 @@ class FileStorageService:
         return False
 
     async def check_health(self) -> bool:
-        """Deep check of storage health and writeability/connectivity."""
+        """Run the backend-specific storage availability check."""
         return await self.backend.a_check_health()

@@ -38,6 +38,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     configure_logging(level=settings.log_level)
     logger.info("Starting %s in [%s] mode", settings.app_name, settings.environment)
 
+    # Validate production database transport and proxy configuration before serving traffic.
+    try:
+        settings.validate_database_configuration()
+        _ = settings.parsed_trusted_proxies
+    except ValueError as val_err:
+        logger.critical("Fatal production configuration error: %s", val_err)
+        raise
+
     # Validate the explicitly selected email provider; production never falls back to mock.
     try:
         settings.validate_email_configuration()
@@ -58,9 +66,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Recover interrupted in-flight jobs left after previous server termination
     try:
-        from app.core.database import async_session_factory
+        from app.core.database import get_async_session_context
         from app.services.analysis_service import AnalysisService
-        async with async_session_factory() as startup_session:
+        async with get_async_session_context() as startup_session:
             analysis_svc = AnalysisService()
             await analysis_svc.recover_interrupted_jobs(startup_session)
     except Exception as exc:
@@ -148,7 +156,7 @@ def create_application(settings: Optional[Settings] = None) -> FastAPI:
             checks["database"] = "unavailable"
             status_code = 503
 
-        # 2. Storage writeability / connectivity check
+        # 2. Backend-specific storage availability check
         try:
             from app.api.deps import get_storage_service
             storage = get_storage_service()
@@ -157,8 +165,8 @@ def create_application(settings: Optional[Settings] = None) -> FastAPI:
             else:
                 checks["storage"] = "inaccessible"
                 status_code = 503
-        except Exception as exc:
-            logger.error("Readiness check storage failure: %s", exc)
+        except Exception:
+            logger.error("Readiness check storage failure")
             checks["storage"] = "inaccessible"
             status_code = 503
 

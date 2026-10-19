@@ -113,8 +113,10 @@ The `AccountService` provides complete, idempotent data purging:
 ### 5.3 Deep Readiness Probe (`/ready` & `/api/v1/ready`)
 - Deep check verifying:
   1. PostgreSQL database connectivity (`SELECT 1`).
-  2. Storage directory read/write capability (creating and unlinking a temporary test file).
+  2. Backend-specific storage availability: local storage creates and unlinks a temporary file; S3 performs a read-only `ListObjectsV2` request limited to one result under `datasets/`.
 - Returns HTTP 200 `{"status": "ready"}` or HTTP 503 `{"status": "unready"}`.
+
+For S3, readiness confirms bucket/list access only; it does not verify object reads, writes, or deletes. It creates no S3 probe objects. Use `/health` for frequent platform liveness probes; reserve `/ready` for dependency readiness checks and manual diagnosis.
 
 ---
 

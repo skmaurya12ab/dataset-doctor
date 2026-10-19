@@ -1,6 +1,7 @@
 """Application configuration management using Pydantic Settings."""
 
 from functools import lru_cache
+from ipaddress import ip_network
 from pathlib import Path
 from typing import Literal, Optional
 from pydantic import AliasChoices, Field, SecretStr, field_validator
@@ -323,12 +324,47 @@ class Settings(BaseSettings):
     @property
     def parsed_trusted_proxies(self) -> list[str]:
         proxies = [proxy.strip() for proxy in self.trusted_proxies.split(",") if proxy.strip()]
-        if self.is_production and any(p in {"0.0.0.0/0", "*", "0.0.0.0"} for p in proxies):
+        normalized: list[str] = []
+        for proxy in proxies:
+            if proxy == "*":
+                raise ValueError(
+                    "Insecure trusted proxy configuration: wildcard trust is forbidden because it permits "
+                    "arbitrary client-supplied forwarded IP headers."
+                )
+            try:
+                network = ip_network(proxy, strict=False)
+            except ValueError as exc:
+                raise ValueError(
+                    "TRUSTED_PROXIES entries must be valid IP addresses or CIDR ranges."
+                ) from exc
+            if network.prefixlen == 0 or network.network_address.is_unspecified:
+                raise ValueError(
+                    "Insecure trusted proxy configuration: all-address and unspecified networks are forbidden."
+                )
+            normalized.append(str(network))
+        return normalized
+
+    def validate_database_configuration(self) -> None:
+        """Require the production database to use the supported async PostgreSQL driver."""
+        if not self.is_production:
+            return
+
+        from urllib.parse import urlsplit
+
+        try:
+            database_url = urlsplit(self.database_url)
+        except ValueError as exc:
             raise ValueError(
-                "Insecure trusted proxy configuration: Wildcard or '0.0.0.0/0' is forbidden in production "
-                "because it permits arbitrary client-supplied forwarded IP headers."
+                "Production configuration error: DATABASE_URL must be a valid postgresql+asyncpg URL."
+            ) from exc
+        if (
+            database_url.scheme != "postgresql+asyncpg"
+            or not database_url.hostname
+            or not database_url.path.strip("/")
+        ):
+            raise ValueError(
+                "Production configuration error: DATABASE_URL must use postgresql+asyncpg and include a database host and name."
             )
-        return proxies
 
     def validate_storage_configuration(self) -> None:
         """Validate storage backend configuration settings.
@@ -375,6 +411,10 @@ class Settings(BaseSettings):
                 "Production configuration error: EMAIL_PROVIDER=mock is not allowed. "
                 "Select a configured smtp or apps_script provider."
             )
+        if self.is_production and not self.require_email_verification:
+            raise ValueError(
+                "Production configuration error: REQUIRE_EMAIL_VERIFICATION must be true."
+            )
 
         if self.email_provider == "smtp":
             from app.core.security import validate_email_format
@@ -396,14 +436,15 @@ class Settings(BaseSettings):
             if not self.apps_script_url:
                 raise ValueError("Email configuration error: APPS_SCRIPT_URL is required for apps_script.")
             endpoint = urlsplit(self.apps_script_url)
+            import re
+
             if (
                 len(self.apps_script_url) > 2048
                 or not self.apps_script_url.isascii()
                 or endpoint.scheme != "https"
                 or endpoint.hostname != "script.google.com"
                 or endpoint.port not in {None, 443}
-                or not endpoint.path.startswith("/macros/s/")
-                or not endpoint.path.endswith("/exec")
+                or not re.fullmatch(r"/macros/s/[A-Za-z0-9_-]+/exec", endpoint.path)
                 or endpoint.username
                 or endpoint.password
                 or endpoint.query

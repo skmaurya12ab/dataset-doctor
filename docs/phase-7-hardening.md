@@ -4,6 +4,8 @@
 **Baseline Commit:** `89bf5fc`  
 **Core Motto:** *AI Proposes. Human Approves. Python Executes.*
 
+> Historical hardening notes for baseline `89bf5fc`. The Docker details below are not current release evidence; the current Dockerfile honors `PORT` (fallback `8000`) and probes `/health`. See [the current production deployment guide](production-deployment-guide.md). No container image build has been verified.
+
 ---
 
 ## 1. System Architecture & Boundaries
@@ -151,6 +153,6 @@ The automated test suite has been expanded across both backend and frontend laye
 - **Host Environment Audit:** The development host environment does not have the `docker` CLI installed (`which docker` returns not found).
 - **Honest Verification Statement:** In accordance with Phase 7 instructions, container runtime execution was **not** faked or simulated.
 - **Static Configuration Audit:**
-  - `Dockerfile`: Multi-stage, Python 3.13-slim base, uses Astral `uv` for reproducible and fast dependency installation, non-root user `appuser` (UID 1000), healthcheck configured at `CMD curl -f http://localhost:8000/health || exit 1`.
+  - `Dockerfile`: Multi-stage, Python 3.13-slim base, uses Astral `uv` for reproducible and fast dependency installation, non-root user `appuser` (UID 1000), healthcheck uses `curl` against `http://127.0.0.1:${PORT:-8000}/health` in Dockerfile `HEALTHCHECK ... CMD` shell form.
   - `docker-compose.yml`: Defines `db` (`postgres:16-alpine` with healthcheck) and `api` (FastAPI with container dependency on `condition: service_healthy`), isolated bridge network `dataset_doctor_net`, persistent volumes `pg_data` and `uploads_data`.
-  - **Verdict:** The static configuration adheres to production containerization best practices and is ready for container runtimes where Docker daemon is active.
+  - **Historical verdict:** This static review applied only to its stated baseline and is not a current production-readiness claim. The current image has not been built or run in this environment; see the current production deployment guide for remaining deployment checks.

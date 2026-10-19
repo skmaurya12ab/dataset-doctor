@@ -170,6 +170,8 @@ npm run dev
 
 ### 3. Running with Docker Compose
 
+This command uses the root docker-compose.yml for local development. The separate docker-compose.prod.yml is legacy and unsupported for the current production architecture; see docs/production-deployment-guide.md.
+
 To spin up PostgreSQL 16 and the FastAPI application in isolated containers:
 
 ```bash

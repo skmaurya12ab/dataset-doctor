@@ -10,6 +10,7 @@ sessions or use thread-isolated execution patterns.
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Optional
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -27,30 +28,46 @@ _engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 
+def build_engine_configuration(settings) -> tuple[object, dict]:
+    """Build SQLAlchemy options, enforcing verified TLS for production PostgreSQL."""
+    engine_url: object = settings.database_url
+    is_sqlite = "sqlite" in settings.database_url.lower()
+    engine_kwargs: dict = {
+        "echo": settings.debug,
+        "future": True,
+    }
+
+    if not is_sqlite:
+        engine_kwargs.update(
+            {
+                "pool_size": 10,
+                "max_overflow": 20,
+                "pool_pre_ping": True,
+                "pool_recycle": 3600,
+            }
+        )
+
+    if settings.is_production:
+        settings.validate_database_configuration()
+        parsed_url = make_url(settings.database_url)
+        query = dict(parsed_url.query)
+        # asyncpg accepts sslmode in its own DSN, but SQLAlchemy forwards URL
+        # query keys as keyword arguments. Remove it and enforce hostname-verified TLS.
+        query.pop("sslmode", None)
+        query.pop("ssl", None)
+        engine_url = parsed_url.set(query=query)
+        engine_kwargs["connect_args"] = {"ssl": "verify-full"}
+
+    return engine_url, engine_kwargs
+
+
 def get_engine() -> AsyncEngine:
     """Retrieve or create the global async engine."""
     global _engine
     if _engine is None:
         settings = get_settings()
-        is_sqlite = "sqlite" in settings.database_url.lower()
-
-        engine_kwargs = {
-            "echo": settings.debug,
-            "future": True,
-        }
-
-        # Postgres-specific connection pooling configuration
-        if not is_sqlite:
-            engine_kwargs.update(
-                {
-                    "pool_size": 10,
-                    "max_overflow": 20,
-                    "pool_pre_ping": True,
-                    "pool_recycle": 3600,
-                }
-            )
-
-        _engine = create_async_engine(settings.database_url, **engine_kwargs)
+        engine_url, engine_kwargs = build_engine_configuration(settings)
+        _engine = create_async_engine(engine_url, **engine_kwargs)
         logger.info("Initialized async database engine.")
     return _engine
 

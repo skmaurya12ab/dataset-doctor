@@ -234,10 +234,20 @@ async def test_mock_keeps_tokens_only_in_explicit_test_interface(caplog) -> None
 
 
 def test_production_email_configuration_fails_closed() -> None:
+    # These assertions cover fail-closed defaults, independent of a developer .env.
     with pytest.raises(ValueError, match="EMAIL_PROVIDER=mock"):
-        Settings(environment="production", require_email_verification=True).validate_email_configuration()
+        Settings(
+            environment="production",
+            require_email_verification=True,
+            _env_file=None,
+        ).validate_email_configuration()
     with pytest.raises(ValueError, match="APPS_SCRIPT_URL"):
-        Settings(environment="production", email_provider="apps_script").validate_email_configuration()
+        Settings(
+            environment="production",
+            email_provider="apps_script",
+            require_email_verification=True,
+            _env_file=None,
+        ).validate_email_configuration()
     valid = apps_script_settings(environment="production", require_email_verification=True)
     valid.validate_email_configuration()
 

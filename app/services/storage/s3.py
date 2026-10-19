@@ -178,9 +178,15 @@ class S3StorageBackend(BaseStorageBackend):
             raise StorageException(f"Could not determine size of s3://{self.bucket_name}/{key}: {exc}") from exc
 
     def check_health(self) -> bool:
+        """Check bucket availability and list access without creating or deleting objects."""
         try:
-            self.client.head_bucket(Bucket=self.bucket_name)
+            self.client.list_objects_v2(
+                Bucket=self.bucket_name,
+                Prefix="datasets/",
+                MaxKeys=1,
+            )
             return True
-        except Exception as exc:
-            logger.error("S3 storage health check failed for bucket '%s': %s", self.bucket_name, exc)
+        except Exception:
+            # Do not log provider exceptions, which may contain request or credential details.
+            logger.error("S3 storage availability check failed for bucket '%s'", self.bucket_name)
             return False

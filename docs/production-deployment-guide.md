@@ -1,251 +1,100 @@
 # Dataset Doctor — Production Deployment Guide
 
-## Overview
+## Deployment status
 
-This guide details the procedure for packaging, deploying, and maintaining Dataset Doctor in a secure, multi-user production environment.
+This guide describes the intended deployment; no hosting project, cloud resource, relay, or public deployment has been created or verified. Local tests do not prove external delivery, storage, database, or deployment behavior.
 
----
+## Legacy Docker Compose path
 
-## 1. Architecture & Deployment Topology
+The retained docker-compose.prod.yml is a legacy reference and is unsupported for the current public production architecture. Use the Vercel + Render + hosted PostgreSQL + Backblaze B2 + Google Apps Script topology in this guide. The legacy file conflicts with current production validation: it trusts the non-IP name proxy, defaults email verification off and omits EMAIL_PROVIDER (which defaults to mock), and connects to a stock PostgreSQL container without TLS while production connections require hostname-verified TLS. It also probes /ready every 15 seconds, although /ready is intended for deeper readiness checks rather than frequent liveness probes. Do not use that Compose file for production without a separately reviewed configuration update. The root docker-compose.yml quickstart is for local development only.
 
-```
-                  ┌───────────────────────────────────────────────┐
-                  │                 Internet                      │
-                  └───────────────────────┬───────────────────────┘
-                                          │ HTTPS (Port 443)
-                                          ▼
-                  ┌───────────────────────────────────────────────┐
-                  │               Nginx / Ingress                 │
-                  │   - TLS Termination                           │
-                  │   - SPA Static Asset Serving (/index.html)    │
-                  │   - Rate Limiting (30 req/s, burst=50)        │
-                  │   - Reverse Proxy with Trusted Headers        │
-                  └───────────────┬───────────────────────────────┘
-                                  │ HTTP (Port 8000)
-                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                      Backend Container (Single Replica)                         │
-│   - FastAPI (Uvicorn ASGI)                                                      │
-│   - In-Process ThreadPoolJobRunner                                              │
-│   - Quota Enforcement & CSRF Validation                                         │
-│   - Argon2id & Hashed Session Storage                                           │
-└───────────────┬─────────────────────────────────────────┬───────────────────────┘
-                │ SQL                                     │ Filesystem
-                ▼                                         ▼
-┌───────────────────────────────┐         ┌───────────────────────────────────────┐
-│     PostgreSQL Database       │         │      Persistent Storage Volume        │
-│   - User accounts & sessions  │         │   - Raw uploads                       │
-│   - Datasets & version state  │         │   - Canonical Parquet files           │
-│   - Analysis & Remediation db │         │   - Mount: /app/uploads               │
-└───────────────────────────────┘         └───────────────────────────────────────┘
-```
+## Recommended topology
 
-> [!IMPORTANT]
-> **Single Backend Replica Constraint**: The application currently executes background analysis and remediation jobs via an in-process worker pool (`ThreadPoolJobRunner`). You **must** run exactly one backend container instance (`replicas: 1`). Do not scale horizontally until a distributed broker (such as Celery/Redis) is introduced.
+    Browser
+      └── Vercel static React/Vite frontend
+            └── same-origin /api/v1 rewrite
+                  └── Render FastAPI service (one instance)
+                        ├── hosted PostgreSQL over verified TLS
+                        ├── private Backblaze B2 bucket through S3 API
+                        └── Google Apps Script HTTPS email relay
 
----
+The backend uses an in-process analysis worker pool. Run one backend instance unless the job runner is moved to a distributed worker system. Render's ephemeral filesystem is staging/cache only; use B2 for persistent dataset objects.
 
-## 2. Environment Configuration
+### Vercel frontend
 
-Copy `.env.example` to `.env` and configure every required parameter.
+Set the Vercel project root to frontend. Build with npm run build and publish dist. Keep VITE_API_BASE_URL unset so the browser uses the same-origin /api/v1 client path. The API rewrite in frontend/vercel.json currently contains a conspicuous placeholder host. After a Render service exists, replace only that destination's host with the exact HTTPS service URL shown by Render, retaining /api/:path*. Do not deploy while the placeholder remains.
 
-### Required Environment Variables
+The ordered SPA rewrite sends remaining paths to /, which is Vercel's clean-URL form of the Vite SPA entrypoint. This supports direct navigation and refresh on /login, /register, /verify-email, /reset-password, and /remediation. Vercel documents the external rewrite and cleanUrls behavior in its [rewrite documentation](https://vercel.com/docs/routing/rewrites) and [Vite SPA guide](https://vercel.com/docs/frameworks/frontend/vite).
 
-```bash
-# Application & Environment
-ENVIRONMENT=production
-APP_NAME="Dataset Doctor"
-LOG_LEVEL=INFO
-ENABLE_API_DOCS=false                # Set to false to disable /docs and /openapi.json in production
+### Render backend
 
-# Security & CORS
-SECRET_KEY=generate_with_openssl_rand_hex_32   # openssl rand -hex 32
-ALLOWED_ORIGINS=https://doctor.yourdomain.com   # Exact origin; NO wildcards with credentials
-COOKIE_DOMAIN=yourdomain.com                    # Optional; defaults to same-host
-COOKIE_SECURE=true                              # Always true over HTTPS
-TRUSTED_PROXIES=127.0.0.1,172.16.0.0/12         # Subnets/IPs of trusted reverse proxies
+Use the repository Dockerfile. It binds to 0.0.0.0 and honors Render's PORT environment variable; local Docker use falls back to port 8000. The image exposes 8000 as metadata to match that local fallback; Render's supplied PORT controls the runtime listener and health check. Render currently defaults PORT to 10000, but verify the effective value in the service configuration. Set the recurring platform health check path to `/health`; it is a lightweight liveness response and does not contact dependencies. Configure one instance because analysis jobs run in-process. `/ready` is a deeper availability check for PostgreSQL and storage. For S3, each `/ready` request performs a read-only `ListObjectsV2` request limited to one result under `datasets/`; it checks bucket/list access only, not object reads, writes, or deletes, and creates no probe object. Use `/ready` for readiness/manual diagnosis rather than a frequent liveness probe.
 
-# Database
-DATABASE_URL=postgresql+asyncpg://dd_user:super_secret_db_pass@db:5432/dataset_doctor
+### Hosted PostgreSQL
 
-# Persistent Storage
-UPLOAD_DIR=/app/uploads                         # Absolute path mounted to persistent volume
+Use a PostgreSQL service reachable from Render and supply the SQLAlchemy async URL using postgresql+asyncpg. Production startup rejects another driver or a missing host. The database engine forces asyncpg TLS mode verify-full and removes sslmode/ssl URL query parameters before engine creation; do not assume a pasted libpq sslmode parameter configures SQLAlchemy's asyncpg connection. The asyncpg TLS behavior is documented in the [asyncpg API reference](https://magicstack.github.io/asyncpg/current/api/index.html).
 
-# Email Delivery
-REQUIRE_EMAIL_VERIFICATION=true
-EMAIL_PROVIDER=apps_script                     # Or smtp; never use mock in production
-APPLICATION_BASE_URL=https://doctor.yourdomain.com
-EMAIL_DAILY_SEND_CAP=20
-EMAIL_RECIPIENT_COOLDOWN_SECONDS=900
-APPS_SCRIPT_URL=https://script.google.com/macros/s/DEPLOYMENT_ID/exec
-APPS_SCRIPT_HMAC_SECRET=store_a_32_byte_random_secret_here
-APPS_SCRIPT_TIMEOUT_SECONDS=12
-# SMTP alternative (use only when EMAIL_PROVIDER=smtp):
-# SMTP_HOST=smtp.example.net
-# SMTP_PORT=587
-# SMTP_USER=your_smtp_user
-# SMTP_PASSWORD=your_smtp_password
-# SMTP_TLS=true
-# EMAIL_FROM=no-reply@yourdomain.com
+Run Alembic migrations as a one-off command from the same application release and with the hosted database environment variable supplied explicitly by the hosting job. The command is alembic upgrade head. Do not rely on a developer's local .env file, run migrations automatically during application startup, or point a deployment migration command at the development database. Confirm the resulting revision with alembic current from that same hosted environment.
 
-# Resource Quotas & Abuse Prevention
-MAX_DATASETS_PER_USER=20
-MAX_CUMULATIVE_STORAGE_MB_PER_USER=500
-MAX_CONCURRENT_ANALYSIS_JOBS_PER_USER=2
-RATE_LIMIT_ANALYSIS_TRIGGER=10/minute
-RATE_LIMIT_AI_EXPLAIN=20/minute
-RATE_LIMIT_AI_PLAN=10/minute
-RATE_LIMIT_REMEDIATION_EXEC=5/minute
-```
+### Backblaze B2
 
-See [Authentication Email Delivery](email-delivery.md) for Apps Script setup, security limits, SMTP variable names, and manual inbox verification. `SMTP_FROM_EMAIL`, `SMTP_FROM_NAME`, and `SMTP_USE_TLS` shown in older deployment notes are not application settings; use `EMAIL_FROM` and `SMTP_TLS`.
+Select STORAGE_BACKEND=s3, provide the B2 S3 endpoint, bucket, region, and a standard application key restricted to the intended bucket and datasets/ prefix. The minimum capabilities used by this implementation are listFiles, readFiles, writeFiles, and deleteFiles. It does not require listAllBucketNames because readiness no longer calls HeadBucket/ListBuckets. See the [B2 S3-compatible key capabilities](https://www.backblaze.com/docs/cloud-storage-s3-compatible-app-keys) and the detailed [persistent storage guide](persistent-object-storage-guide.md).
 
----
+### Authentication email
 
-## 3. Database Migrations
+Production requires REQUIRE_EMAIL_VERIFICATION=true, rejects EMAIL_PROVIDER=mock, and validates the selected provider during startup. Configure either Apps Script or SMTP fully. Apps Script requires an HTTPS APPLICATION_BASE_URL, an exact deployed Google /exec URL, and a random HMAC secret of at least 32 bytes. SMTP requires a host, STARTTLS, a syntactically valid sender, and paired username/password if the relay authenticates. Provider-side sender authorization and actual inbox delivery remain manual checks. See [Authentication Email Delivery](email-delivery.md).
 
-Never allow application containers to run migrations automatically in parallel. Run migrations as a one-off pre-deployment task:
+## Environment variables
 
-```bash
-# In container or CI/CD deployment pipeline:
-alembic upgrade head
-```
+These names come from app/core/config.py and the provider implementations. They are configuration names, not values to copy into source control.
 
-Verify that the current revision matches `head`:
-```bash
-alembic current
-```
+### Render non-secret configuration
 
----
+- APP_NAME, ENVIRONMENT=production, DEBUG=false, LOG_LEVEL, ENABLE_API_DOCS=false
+- DATABASE_URL (the connection string itself is secret)
+- PORT is supplied by Render, not by application Settings; the Dockerfile honors it.
+- STORAGE_BACKEND=s3, UPLOAD_DIR, MAX_UPLOAD_SIZE_MB
+- S3_ENDPOINT_URL, S3_BUCKET_NAME, S3_REGION, S3_SIGNATURE_VERSION
+- OPENAI_MODEL, OPENAI_TIMEOUT_SECONDS, OPENAI_MAX_RETRIES, OPENAI_RETRY_BACKOFF, OPENAI_MAX_INPUT_TOKENS, OPENAI_MAX_OUTPUT_TOKENS
+- SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS, COOKIE_SECURE=true, COOKIE_SAMESITE=lax
+- REQUIRE_EMAIL_VERIFICATION=true, EMAIL_PROVIDER, APPLICATION_BASE_URL, ALLOWED_ORIGINS, TRUSTED_PROXIES
+- APPS_SCRIPT_URL when Apps Script is selected
+- SMTP_HOST, SMTP_PORT, SMTP_TLS, EMAIL_FROM when SMTP is selected
+- EMAIL_DAILY_SEND_CAP, EMAIL_RECIPIENT_COOLDOWN_SECONDS, APPS_SCRIPT_TIMEOUT_SECONDS
+- MAX_WORKER_THREADS, MAX_DATASETS_PER_USER, MAX_CUMULATIVE_STORAGE_MB_PER_USER, MAX_CONCURRENT_ANALYSIS_JOBS_PER_USER
+- RATE_LIMIT_ANALYSIS_TRIGGERS_PER_MINUTE, RATE_LIMIT_AI_EXPLANATIONS_PER_MINUTE, RATE_LIMIT_AI_PLANS_PER_MINUTE, RATE_LIMIT_REMEDIATIONS_PER_MINUTE
 
-## 4. Container Build & Deployment
+### Render secrets
 
-### 4.1 Production Dockerfile & Compose
-Build and package using `docker-compose.prod.yml`:
+- DATABASE_URL
+- S3_ACCESS_KEY and S3_SECRET_KEY (the settings also accept the documented AWS-compatible aliases)
+- APPS_SCRIPT_HMAC_SECRET, or SMTP_PASSWORD and SMTP_USER when SMTP authentication is selected
+- OPENAI_API_KEY only when genuine OpenAI-generated advice is intended
 
-```bash
-# 1. Build images
-docker compose -f docker-compose.prod.yml build
+When EMAIL_PROVIDER=apps_script, also set APPS_SCRIPT_URL. When EMAIL_PROVIDER=smtp, configure SMTP_HOST, SMTP_PORT, SMTP_USER and SMTP_PASSWORD together when authentication is needed, SMTP_TLS=true, and EMAIL_FROM to a sender authorized by that SMTP service. The application has no SECRET_KEY or COOKIE_DOMAIN setting; do not configure those as though the code consumes them. EMAIL_PROVIDER=mock only belongs in development/testing. If OPENAI_API_KEY is absent, the AI factory uses a clearly labeled mock sample provider; this is not genuine AI output.
 
-# 2. Run pre-deployment migrations
-docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head
+### Vercel configuration
 
-# 3. Start services
-docker compose -f docker-compose.prod.yml up -d
-```
+No VITE_API_BASE_URL is needed for the same-origin design. The only pending routing change is the explicit Render hostname replacement in frontend/vercel.json after Render supplies the real URL. Do not put backend-only keys in Vercel frontend environment variables.
 
-### 4.2 Non-Root User & Permissions
-The backend container runs as a non-privileged user `appuser` (UID 10001). The host directory mounted to `/app/uploads` must have matching ownership:
-```bash
-sudo chown -R 10001:10001 /opt/dataset-doctor/uploads
-```
+## Cookie, CSRF, CORS, and proxy settings
 
----
+Production session and CSRF cookies use Secure and SameSite=Lax by default; the session cookie is HttpOnly and the double-submit CSRF cookie is readable by the frontend client. Cookie-authenticated state-changing routes require matching CSRF cookie/header values, including logout. Login, registration, email verification, password-reset, and verification-resend flows retain their narrow initial-authentication exemptions.
 
-## 5. Reverse Proxy & HTTPS Configuration
+Set ALLOWED_ORIGINS to the exact frontend origin even with a same-origin rewrite. Do not use a wildcard with credentials. TRUSTED_PROXIES accepts explicit IP addresses or CIDR ranges and rejects all-address networks. The app trusts forwarded client IPs only when the direct peer matches that list, validates forwarded values, and walks the chain from the right. Vercel documents X-Forwarded-For and X-Real-IP forwarding, but the actual peer seen inside Render and any intermediate proxy behavior have not been verified. Do not guess a proxy range or trust all proxies. Verify the deployed request path first; if no narrow trustworthy peer range is available, leave forwarded headers untrusted and understand that IP rate limits may group traffic by the observed peer.
 
-The provided `nginx/nginx.conf` handles:
-1. **Client Body Size**: `client_max_body_size 100M;` for tabular file uploads.
-2. **Rate Limiting**: `limit_req_zone $binary_remote_addr zone=api_limit:10m rate=30r/s;`
-3. **Forwarded Headers**: Pass `X-Forwarded-For`, `X-Forwarded-Proto`, and `Host`.
-4. **SPA Fallback**:
-   ```nginx
-   location / {
-       try_files $uri $uri/ /index.html;
-   }
-   ```
-5. **TLS Termination**: Place SSL certificates (e.g. from Let's Encrypt / Certbot) on the proxy:
-   ```nginx
-   ssl_certificate /etc/letsencrypt/live/doctor.yourdomain.com/fullchain.pem;
-   ssl_certificate_key /etc/letsencrypt/live/doctor.yourdomain.com/privkey.pem;
-   ```
+## Health checks and manual deployment sequence
 
----
+1. Create/configure the Vercel, Render, hosted PostgreSQL, B2, and email accounts manually; obtain consent and authorize the sender.
+2. Set production variables and secrets in the correct service. Keep the Render service single-instance.
+3. Confirm the actual Render PORT and public HTTPS service URL. Update the Vercel rewrite placeholder to that exact URL, set the Vercel project root/build settings, and leave VITE_API_BASE_URL unset.
+4. Run alembic upgrade head once against the intended hosted database using that release's runtime configuration.
+5. Deploy the backend and frontend.
+6. Check /health and /ready. Then test authenticated registration/login, CSRF-protected logout, upload/download/delete, direct SPA routes, and both verification and password-reset messages using controlled accounts and data.
+7. Verify proxy peer/forwarded headers, TLS, cookie attributes, B2 permissions, inbox delivery, and sender identity from live service logs and browser/network behavior.
 
-## 6. Health & Readiness Probes
+These steps have not been run. Free-plan eligibility, quotas, sleeping behavior, provider approval, and charges depend on current account terms and usage and are not guaranteed here.
 
-Configure load balancer and container orchestrator health checks:
+## Retained self-hosted alternative
 
-- **Liveness Probe** (Every 10s):
-  - URL: `/health`
-  - Expected Response: `200 OK`
-  - Payload: `{"status": "ok"}`
-  - Note: Does not query external dependencies; avoids restart cascades.
-
-- **Readiness Probe** (Every 15s):
-  - URL: `/ready`
-  - Expected Response: `200 OK`
-  - Payload: `{"status": "ready", "checks": {"database": "connected", "storage": "available"}}`
-  - Returns `503 Service Unavailable` if PostgreSQL connection or storage directory fails.
-
----
-
-## 7. Backups and Disaster Recovery
-
-### 7.1 Running a Backup
-The backup script captures both PostgreSQL data and disk storage:
-```bash
-./scripts/backup.sh /var/backups/dataset-doctor
-```
-This generates:
-- `db_<TIMESTAMP>.sql.gz`
-- `storage_<TIMESTAMP>.tar.gz`
-
-### 7.2 Verifying Backup Integrity
-After restoring or downloading a backup snapshot:
-```bash
-python scripts/verify_backup.py \
-  --db-url "postgresql+asyncpg://..." \
-  --storage-dir "/var/dataset-doctor/uploads"
-```
-The script verifies that every Parquet file recorded in the database exists and that SHA-256 hashes match.
-
-### 7.3 Restoring from Backup
-```bash
-./scripts/restore.sh \
-  /var/backups/dataset-doctor/db_20261015_120000.sql.gz \
-  /var/backups/dataset-doctor/storage_20261015_120000.tar.gz
-```
-
----
-
-## 8. Log Monitoring & Rollback
-
-### 8.1 Log Monitoring
-- Filter logs for warnings and errors:
-  ```bash
-  docker compose -f docker-compose.prod.yml logs -f --tail=100 backend | grep -E "ERROR|WARNING"
-  ```
-- Startup recovery events are logged as:
-  `Recovered X interrupted analysis runs from previous process termination`
-
-### 8.2 Rollback Procedure
-If a deployment fails:
-1. Stop the application:
-   ```bash
-   docker compose -f docker-compose.prod.yml down
-   ```
-2. Rollback the database migration:
-   ```bash
-   docker compose -f docker-compose.prod.yml run --rm backend alembic downgrade -1
-   ```
-3. Revert image tags to the previous stable release:
-   ```bash
-   docker compose -f docker-compose.prod.yml up -d
-   ```
-
----
-
-## 9. Verification Matrix
-
-| Area | Verified in Automated Test Suite | Requires Hosting Environment Setup |
-|---|---|---|
-| Hashed Session Storage | Yes (`test_security_hardening.py`) | Database provisioning |
-| CSRF Header Double-Submit | Yes (`test_security_hardening.py`) | HTTPS certificate |
-| Email Verification Gating | Yes (`test_security_hardening.py`) | DNS & MX/SPF/DKIM records |
-| Quotas & Concurrency Caps | Yes (`test_quotas_and_abuse.py`) | Persistent volume mount |
-| Startup Job Recovery | Yes (`test_startup_recovery_and_health.py`) | Container orchestrator restart |
-| Health & Readiness Probes | Yes (`test_startup_recovery_and_health.py`) | Load balancer probe configuration |
-| Account & Dataset Deletion | Yes (`test_account_deletion.py`) | Backup rotation policy |
-| Backup Hash Verification | Yes (`test_backup_restore.py`) | Offsite S3/GCS sync cron |
-| Frontend Assets & SPA Fallback | Yes (Vitest & Nginx config) | Public DNS pointing to proxy |
+A separately operated single-host deployment can terminate TLS at Nginx and run one FastAPI instance with a persistent UPLOAD_DIR and PostgreSQL. That is an alternative topology, not the recommended Vercel/Render/B2 arrangement. The Nginx host, certificate automation, persistent disk, backups, SMTP relay, and proxy trust configuration must be supplied and verified by its operator.

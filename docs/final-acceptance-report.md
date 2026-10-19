@@ -6,6 +6,8 @@
 **Target Branch:** `main`  
 **Final Release Recommendation:** **READY FOR RELEASE**  
 
+> Historical report for its stated baseline and test counts. It is superseded as a current release assessment; current deployment requirements and status are in docs/production-deployment-guide.md.
+
 ---
 
 ## 1. Executive Summary
@@ -29,7 +31,7 @@ The acceptance testing was conducted on the host environment with the following 
 | :--- | :--- |
 | **Operating System** | Linux 6.12.16-arch1-1 (x86_64) |
 | **Python Version** | Python 3.14.4 |
-| **Python Virtual Environment** | `/home/saurabh-kumar-maurya/dev-env` |
+| **Python Virtual Environment** | Local Python virtual environment |
 | **Node.js Version** | v22.23.3 (via NVM) |
 | **npm Version** | 10.9.9 |
 | **Database** | PostgreSQL 16 (Local asyncpg connection on port 5432) |
@@ -346,7 +348,7 @@ As established during Phase 7, the local host environment does not have the Dock
   - Base image: `python:3.13-slim`.
   - Non-root user: `appuser` (UID 1000) created and utilized.
   - Package caching: Multi-stage layer caching with Astral `uv:0.5.11`.
-  - Healthcheck: Configured with `curl -f http://localhost:8000/health`.
+  - Historical healthcheck used fixed port 8000. The current Dockerfile honors `PORT` with an 8000 fallback and checks `/health`; no current image build has been verified.
 - **`docker-compose.yml`:**
   - Service relationships: `api` depends on `db` with `condition: service_healthy`.
   - Database: `postgres:16-alpine` with healthcheck on `pg_isready`.

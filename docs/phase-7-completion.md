@@ -125,6 +125,8 @@ Phase 7 hardened Dataset Doctor across all analytical, operational, safety, API,
 
 ## Docker Compose Verification Status
 
+> Historical static review only. The checks below refer to the development docker-compose.yml; they do not establish a current production image build. docker-compose.prod.yml is legacy/unsupported for the current production architecture; see docs/production-deployment-guide.md.
+
 - **Development Host Inspection:** The development machine does not have the `docker` CLI or daemon installed (`which docker` returns not found).
 - **Honest Verification Statement:** Container startup and migration execution were **not** simulated or falsely reported as executed.
 - **Static Audit:**

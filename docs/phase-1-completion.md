@@ -195,7 +195,7 @@ tests/test_storage.py::test_parquet_serialization_and_preview PASSED     [100%]
 ### 9.1 Docker Environment Verification
 - **Command:** `Get-Command docker`
 - **Result:** Docker / Docker Desktop is not installed on the local Windows host environment (`ObjectNotFound: CommandNotFoundException`).
-- **Container Readiness:** The multi-stage `Dockerfile` (Python 3.13) and `docker-compose.yml` (PostgreSQL 16 Alpine + healthchecks + volumes) are fully configured and verified for production/CI environments where Docker is present.
+- **Historical container note:** The Dockerfile and development docker-compose.yml were reviewed during this phase only. That historical check does not establish current production readiness; docker-compose.prod.yml is now explicitly unsupported for the current production architecture. See docs/production-deployment-guide.md.
 
 ### 9.2 PostgreSQL Native Service Verification
 - **Host Service:** PostgreSQL 18 Server (`postgresql-x64-18`, running natively on Windows).

@@ -2,6 +2,10 @@
 
 Dataset Doctor sends registration-verification and password-reset messages through the existing `BaseEmailService` interface. `EMAIL_PROVIDER` explicitly selects `mock`, `smtp`, or `apps_script`; production rejects `mock` and fails startup if the selected real provider is incomplete. Verification tokens and reset tokens remain random, hashed in PostgreSQL, time-limited, and single-use. Messages contain links to the existing frontend routes: `/verify-email?token=...` and `/reset-password?token=...`.
 
+Production startup also requires REQUIRE_EMAIL_VERIFICATION=true; mock email remains development/testing only.
+
+For SMTP, the backend requires SMTP_HOST, SMTP_TLS=true, a syntactically valid EMAIL_FROM, and SMTP_USER/SMTP_PASSWORD either both present or both absent. Configure a sender accepted by the selected relay; the code cannot prove sender ownership or inbox placement. For Apps Script, the backend requires an HTTPS application origin, a deployed Google /exec URL, and an HMAC secret of at least 32 bytes. Use a randomly generated secret and never expose it to frontend variables. These checks validate local configuration only; provider account authorization and live delivery still need manual verification.
+
 ## Provider and request limits
 
 | Setting | Default | Behavior |

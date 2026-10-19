@@ -6,6 +6,8 @@
 **Latest Commit Hash:** `7c77fc9` (`fix(frontend): resolve versions page rendering error`)
 **Tracking State:** `origin/main` (Up to date, clean working tree)
 
+> Historical audit for its stated commit and repository state. Its findings are not current release evidence; use docs/production-deployment-guide.md for the supported production architecture and current manual checks.
+
 ---
 
 ## 1. Executive Summary

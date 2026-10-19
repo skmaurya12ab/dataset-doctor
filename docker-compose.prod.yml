@@ -1,6 +1,8 @@
 # ==============================================================================
-# Dataset Doctor — Production Docker Compose Specification
-# Single-replica backend constraint enforced until distributed task queue is added
+# LEGACY / UNSUPPORTED for the current public production architecture.
+# Retained for historical reference; see docs/production-deployment-guide.md.
+# Defaults conflict with current production proxy, email, and database TLS checks.
+# Do not use this file as a current production deployment.
 # ==============================================================================
 
 services:

@@ -158,6 +158,49 @@ async def test_csrf_protection_on_cookie_authenticated_requests(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("csrf_header", "expected_status"),
+    [(None, 403), ("invalid", 403), ("valid", 200)],
+)
+async def test_logout_requires_csrf_for_cookie_sessions(
+    test_settings: Settings,
+    test_db_session: AsyncSession,
+    test_storage: FileStorageService,
+    csrf_header: str | None,
+    expected_status: int,
+) -> None:
+    app = create_application()
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    app.dependency_overrides[get_db] = lambda: test_db_session
+    app.dependency_overrides[get_storage_service] = lambda: test_storage
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/api/v1/auth/register",
+            json={"email": "csrf_logout@example.com", "password": "Password123!"},
+        )
+        login = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "csrf_logout@example.com", "password": "Password123!"},
+        )
+        csrf_token = login.json()["csrf_token"]
+        headers = {}
+        if csrf_header == "valid":
+            headers["X-CSRF-Token"] = csrf_token
+        elif csrf_header == "invalid":
+            headers["X-CSRF-Token"] = "wrong-token"
+
+        response = await client.post("/api/v1/auth/logout", headers=headers)
+        assert response.status_code == expected_status
+
+        me = await client.get("/api/v1/auth/me")
+        assert me.status_code == (401 if expected_status == 200 else 200)
+
+    app.dependency_overrides.clear()
+
+
+@pytest.mark.asyncio
 async def test_resend_verification_endpoint(
     test_settings: Settings,
     test_db_session: AsyncSession,

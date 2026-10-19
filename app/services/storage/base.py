@@ -62,7 +62,7 @@ class BaseStorageBackend(ABC):
 
     @abstractmethod
     def check_health(self) -> bool:
-        """Check storage backend connectivity and writeability."""
+        """Check backend-specific storage availability and required access."""
         pass
 
     # Async wrappers using asyncio.to_thread for non-blocking I/O in async routes

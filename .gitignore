@@ -26,9 +26,10 @@ venv/
 ENV/
 env/
 
-# Environment variables & secrets (NEVER commit .env)
+# Environment variables & secrets (NEVER commit .env or backups)
 .env
 .env.local
+.env.before-*
 *.secret.env
 
 # Testing & Coverage

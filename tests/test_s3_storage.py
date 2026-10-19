@@ -2,6 +2,8 @@
 
 import hashlib
 import io
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import AsyncGenerator
 import uuid
@@ -132,7 +134,7 @@ def test_production_trusted_proxies_rejects_wildcard():
     with pytest.raises(ValueError) as exc_info:
         _ = s.parsed_trusted_proxies
 
-    assert "Wildcard or '0.0.0.0/0' is forbidden in production" in str(exc_info.value)
+    assert "all-address and unspecified networks are forbidden" in str(exc_info.value)
 
 
 # ==============================================================================
@@ -211,18 +213,89 @@ def test_s3_backend_delete_file_and_prefix(s3_backend: S3StorageBackend, tmp_pat
     assert s3_backend.exists("datasets/ds_b/versions/v1/data.parquet") is True
 
 
-def test_s3_backend_health_check(s3_backend: S3StorageBackend, mock_s3_env):
-    """Verify health check returns True for accessible bucket, False otherwise."""
-    assert s3_backend.check_health() is True
+def test_s3_backend_health_check_repeated_calls_are_read_only(
+    s3_backend: S3StorageBackend,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Repeated readiness checks list one dataset key and never mutate S3 objects."""
+    calls = {"list": 0, "put": 0, "delete": 0}
+    list_objects = s3_backend.client.list_objects_v2
 
-    bad_backend = S3StorageBackend(
-        endpoint_url=mock_s3_env["endpoint_url"],
-        bucket_name="nonexistent-random-bucket-xyz",
-        access_key="mock",
-        secret_key="mock",
-        s3_client=mock_s3_env["client"],
-    )
-    assert bad_backend.check_health() is False
+    def counted_list(**kwargs):
+        calls["list"] += 1
+        assert kwargs["Prefix"] == "datasets/"
+        assert kwargs["MaxKeys"] == 1
+        return list_objects(**kwargs)
+
+    def counted_put(**kwargs):
+        calls["put"] += 1
+
+    def counted_delete(**kwargs):
+        calls["delete"] += 1
+
+    monkeypatch.setattr(s3_backend.client, "list_objects_v2", counted_list)
+    monkeypatch.setattr(s3_backend.client, "put_object", counted_put)
+    monkeypatch.setattr(s3_backend.client, "delete_object", counted_delete)
+
+    assert all(s3_backend.check_health() for _ in range(5))
+    assert calls == {"list": 5, "put": 0, "delete": 0}
+
+
+def test_s3_backend_health_check_concurrent_calls_are_read_only(
+    s3_backend: S3StorageBackend,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Concurrent readiness checks use independent read-only listing requests."""
+    calls = {"list": 0, "put": 0, "delete": 0}
+    calls_lock = threading.Lock()
+    concurrent_calls = threading.Barrier(4, timeout=5)
+
+    def counted_list(**kwargs):
+        with calls_lock:
+            calls["list"] += 1
+        assert kwargs["Bucket"] == s3_backend.bucket_name
+        assert kwargs["Prefix"] == "datasets/"
+        assert kwargs["MaxKeys"] == 1
+        concurrent_calls.wait()
+        return {"KeyCount": 0}
+
+    def counted_put(**kwargs):
+        with calls_lock:
+            calls["put"] += 1
+
+    def counted_delete(**kwargs):
+        with calls_lock:
+            calls["delete"] += 1
+
+    monkeypatch.setattr(s3_backend.client, "list_objects_v2", counted_list)
+    monkeypatch.setattr(s3_backend.client, "put_object", counted_put)
+    monkeypatch.setattr(s3_backend.client, "delete_object", counted_delete)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        results = list(executor.map(lambda _: s3_backend.check_health(), range(4)))
+    assert results == [True] * 4
+    assert calls == {"list": 4, "put": 0, "delete": 0}
+
+
+def test_s3_backend_health_check_fails_when_listing_is_denied(
+    s3_backend: S3StorageBackend,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+):
+    from botocore.exceptions import ClientError
+
+    def deny_listing(**kwargs):
+        raise ClientError(
+            {
+                "Error": {"Code": "AccessDenied", "Message": "provider detail mock-secret-key"},
+                "ResponseMetadata": {"HTTPStatusCode": 403},
+            },
+            "ListObjectsV2",
+        )
+
+    monkeypatch.setattr(s3_backend.client, "list_objects_v2", deny_listing)
+    assert s3_backend.check_health() is False
+    assert "mock-secret-key" not in caplog.text
 
 
 # ==============================================================================

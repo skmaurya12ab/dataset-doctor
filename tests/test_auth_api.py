@@ -115,17 +115,21 @@ async def test_logout_invalidates_session_and_clears_cookies(unauthenticated_asy
         "/api/v1/auth/register",
         json={"email": "logoutuser@example.com", "password": "ValidPassword123!"},
     )
-    await client.post(
+    login_resp = await client.post(
         "/api/v1/auth/login",
         json={"email": "logoutuser@example.com", "password": "ValidPassword123!"},
     )
+    csrf_token = login_resp.json()["csrf_token"]
 
     # Validate active
     me_resp1 = await client.get("/api/v1/auth/me")
     assert me_resp1.status_code == 200
 
     # Logout
-    logout_resp = await client.post("/api/v1/auth/logout")
+    logout_resp = await client.post(
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": csrf_token},
+    )
     assert logout_resp.status_code == 200
 
     # Validate subsequent request is unauthenticated
