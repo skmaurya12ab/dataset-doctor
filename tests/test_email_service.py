@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import io
 import json
+import subprocess
+from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
@@ -110,6 +112,115 @@ def test_action_urls_match_existing_frontend_routes_and_encode_token() -> None:
         build_action_url("https://dataset.example/other", "verification", "A" * 43)
     with pytest.raises(ValueError):
         build_action_url("https://dataset.example", "verification", "short")
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://dataset.example ",
+        "https://data set.example",
+        "https://dataset.example?",
+        "https://dataset.example#",
+        "https://dataset.example:not-a-port",
+        "https://dataset.example:70000",
+    ],
+)
+def test_action_url_builder_rejects_whitespace_delimiters_and_invalid_ports(base_url: str) -> None:
+    with pytest.raises(ValueError, match="APPLICATION_BASE_URL"):
+        build_action_url(base_url, "verification", "A" * 43)
+
+
+@pytest.mark.parametrize(
+    "base_url",
+    [
+        "https://dataset.example ",
+        "https://data set.example",
+        "https://dataset.example?",
+        "https://dataset.example#",
+        "https://dataset.example:not-a-port",
+        "https://dataset.example:70000",
+    ],
+)
+def test_email_configuration_rejects_ambiguous_application_origins(base_url: str) -> None:
+    settings = Settings(application_base_url=base_url, _env_file=None)
+    with pytest.raises(ValueError, match="APPLICATION_BASE_URL"):
+        settings.validate_email_configuration()
+
+
+@pytest.mark.parametrize("message_type", ["verification", "password_reset"])
+def test_python_generated_action_urls_pass_apps_script_validator_offline(message_type: str) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+    payload = service._create_payload(message_type, "person@example.com", "A_" + "B" * 40 + "_")
+    node_script = r"""
+      const fs = require('node:fs')
+      const vm = require('node:vm')
+      const context = vm.createContext({ URL, Math, Number, Object, Array, String, JSON, RegExp, isFinite })
+      vm.runInContext(fs.readFileSync('integrations/apps-script-email-relay/Code.gs', 'utf8'), context)
+      let input = ''
+      process.stdin.setEncoding('utf8')
+      process.stdin.on('data', chunk => { input += chunk })
+      process.stdin.on('end', () => {
+        const payload = JSON.parse(input)
+        const reason = context.actionUrlValidationReason_(
+          payload.action_url,
+          payload.configured_base,
+          payload.message_type,
+        )
+        process.stdout.write(reason === null ? 'valid' : String(reason))
+      })
+    """
+    project_root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["node", "-e", node_script],
+        cwd=project_root,
+        input=json.dumps(
+            {
+                "action_url": payload["action_url"],
+                "configured_base": "https://dataset.example",
+                "message_type": payload["message_type"],
+            }
+        ),
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, "Apps Script URL validator test harness failed"
+    assert result.stdout == "valid", "Python-generated action URL was rejected by Apps Script"
+
+
+@pytest.mark.parametrize(
+    ("reason", "logged_reason"),
+    [
+        ("origin_mismatch", "origin_mismatch"),
+        ("untrusted-provider-value", "unrecognized_reason"),
+    ],
+)
+def test_relay_logs_only_allowlisted_action_url_reason(
+    monkeypatch, caplog, reason: str, logged_reason: str
+) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+    payload = service._create_payload("verification", "person@example.com", "C" * 43)
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size):
+            return json.dumps({"status": "invalid_action_url", "reason": reason}).encode()
+
+    monkeypatch.setattr(email_service, "open_relay_request", lambda *_args, **_kwargs: Response())
+
+    assert service._post(payload) == "invalid_action_url"
+    expected = f"Apps Script relay validation status=invalid_action_url reason={logged_reason}"
+    assert any(record.getMessage() == expected for record in caplog.records)
+    if reason != logged_reason:
+        assert all(reason not in record.getMessage() for record in caplog.records)
 
 
 def test_relay_post_accepts_confirmed_response_and_rejects_non_sent_status(monkeypatch) -> None:

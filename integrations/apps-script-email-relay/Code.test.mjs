@@ -209,7 +209,9 @@ test('classifies recipient and action URL validation failures separately', () =>
   const invalidActionUrl = relay.payload({ action_url: `https://attacker.example/verify-email?token=${token}` })
 
   assert.equal(relay.post(invalidRecipient).status, 'invalid_recipient')
-  assert.equal(relay.post(invalidActionUrl).status, 'invalid_action_url')
+  const rejected = relay.post(invalidActionUrl)
+  assert.equal(rejected.status, 'invalid_action_url')
+  assert.equal(rejected.reason, 'origin_mismatch')
   assert.equal(relay.sent.length, 0)
 
   const statuses = relay.diagnostics
@@ -217,6 +219,42 @@ test('classifies recipient and action URL validation failures separately', () =>
     .filter((record) => record.stage === 'response_returned')
     .map((record) => record.status)
   assert.deepEqual(statuses, ['invalid_recipient', 'invalid_action_url'])
+})
+
+test('reports only allowlisted action URL validation reasons', () => {
+  const relay = createRelay()
+  const validUrl = `https://dataset.example/verify-email?token=${token}`
+  const cases = [
+    ['https://dataset.example/verify-email?token=' + token, 'http://dataset.example', 'verification', 'base_protocol'],
+    [validUrl, 'https://user:private@dataset.example', 'verification', 'base_credentials'],
+    [validUrl, 'https://dataset.example/base', 'verification', 'base_path'],
+    [validUrl, 'https://dataset.example/?mode=demo', 'verification', 'base_query'],
+    [validUrl, 'https://dataset.example?', 'verification', 'base_query'],
+    [validUrl, 'https://dataset.example/#demo', 'verification', 'base_fragment'],
+    [validUrl, 'https://dataset.example#', 'verification', 'base_fragment'],
+    [`http://dataset.example/verify-email?token=${token}`, 'https://dataset.example', 'verification', 'link_protocol'],
+    [`https://attacker.example/verify-email?token=${token}`, 'https://dataset.example', 'verification', 'origin_mismatch'],
+    [`https://dataset.example/other?token=${token}`, 'https://dataset.example', 'verification', 'path_mismatch'],
+    [`https://user:private@dataset.example/verify-email?token=${token}`, 'https://dataset.example', 'verification', 'link_credentials'],
+    [`${validUrl}#demo`, 'https://dataset.example', 'verification', 'link_fragment'],
+    ['https://dataset.example/verify-email', 'https://dataset.example', 'verification', 'token_count'],
+    [`${validUrl}&token=${token}`, 'https://dataset.example', 'verification', 'token_count'],
+    [`${validUrl}&source=demo`, 'https://dataset.example', 'verification', 'unexpected_query'],
+    ['https://dataset.example/verify-email?token=short', 'https://dataset.example', 'verification', 'token_format'],
+    ['https://[', 'https://dataset.example', 'verification', 'url_parse_error'],
+    [validUrl, 'https://dataset.example ', 'verification', 'base_whitespace'],
+    [`https://dataset.example /verify-email?token=${token}`, 'https://dataset.example', 'verification', 'link_whitespace'],
+  ]
+
+  for (const [actionUrl, actionBase, messageType, expectedReason] of cases) {
+    assert.equal(relay.context.actionUrlValidationReason_(actionUrl, actionBase, messageType), expectedReason)
+  }
+
+  const normalizedOrigin = `https://DATASET.EXAMPLE:443/verify-email?token=${token}`
+  assert.equal(relay.context.actionUrlValidationReason_(normalizedOrigin, 'https://dataset.example', 'verification'), null)
+  const safeFallback = relay.context.relayResponse_(0, 'action_url_rejected', 'invalid_action_url', 'untrusted-provider-value')
+  assert.equal(JSON.parse(safeFallback.getContent()).reason, 'url_parse_error')
+  assert.equal(relay.sent.length, 0)
 })
 
 test('rejects invalid signatures and stale timestamps', () => {
@@ -275,7 +313,9 @@ test('rejects unsupported routes and enforces recipient and daily caps', () => {
 
 test('rejects action base URLs containing credentials', () => {
   const relay = createRelay({ actionBase: 'https://user:password@dataset.example' })
-  assert.equal(relay.post(relay.payload()).status, 'invalid_action_url')
+  const response = relay.post(relay.payload())
+  assert.equal(response.status, 'invalid_action_url')
+  assert.equal(response.reason, 'base_credentials')
   assert.equal(relay.sent.length, 0)
 })
 

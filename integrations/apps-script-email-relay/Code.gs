@@ -20,6 +20,11 @@ var SAFE_RELAY_STATUSES = [
   "busy", "cooldown", "daily_cap", "quota_exhausted", "relay_error", "delivery_unknown",
   "delivery_failed", "idempotency_conflict", "replay"
 ];
+var SAFE_ACTION_URL_REASONS = [
+  "base_whitespace", "base_protocol", "base_credentials", "base_path", "base_query", "base_fragment",
+  "link_whitespace", "link_protocol", "origin_mismatch", "path_mismatch", "link_credentials",
+  "link_fragment", "token_count", "unexpected_query", "token_format", "url_parse_error"
+];
 
 function logRelayStage_(startedAt, stage, status) {
   var record = {
@@ -36,10 +41,14 @@ function logRelayStage_(startedAt, stage, status) {
   }
 }
 
-function relayResponse_(startedAt, stage, status) {
+function relayResponse_(startedAt, stage, status, reason) {
   logRelayStage_(startedAt, stage);
   logRelayStage_(startedAt, "response_returned", status);
-  return output_({ status: status });
+  var response = { status: status };
+  if (status === "invalid_action_url") {
+    response.reason = SAFE_ACTION_URL_REASONS.indexOf(reason) >= 0 ? reason : "url_parse_error";
+  }
+  return output_(response);
 }
 
 function doPost(event) {
@@ -85,8 +94,9 @@ function doPost(event) {
   if (!validRecipient_(payload.recipient)) {
     return relayResponse_(startedAt, "recipient_rejected", "invalid_recipient");
   }
-  if (!validActionUrl_(payload.action_url, actionBase, payload.message_type)) {
-    return relayResponse_(startedAt, "action_url_rejected", "invalid_action_url");
+  var actionUrlReason = actionUrlValidationReason_(payload.action_url, actionBase, payload.message_type);
+  if (actionUrlReason !== null) {
+    return relayResponse_(startedAt, "action_url_rejected", "invalid_action_url", actionUrlReason);
   }
   logRelayStage_(startedAt, "recipient_and_action_validated");
 
@@ -250,22 +260,49 @@ function validRecipient_(recipient) {
 }
 
 function validActionUrl_(actionUrl, configuredBase, messageType) {
+  return actionUrlValidationReason_(actionUrl, configuredBase, messageType) === null;
+}
+
+function actionUrlValidationReason_(actionUrl, configuredBase, messageType) {
+  if (typeof configuredBase !== "string" || /[\s\u0000-\u001f\u007f]/.test(configuredBase)) return "base_whitespace";
+  if (typeof actionUrl !== "string" || /[\s\u0000-\u001f\u007f]/.test(actionUrl)) return "link_whitespace";
+
+  var base;
+  var link;
   try {
-    var link = new URL(actionUrl);
-    var base = new URL(configuredBase);
-    var expectedPath = messageType === "verification" ? "/verify-email" : "/reset-password";
-    var tokenValues = link.searchParams.getAll("token");
-    var queryKeys = [];
-    link.searchParams.forEach(function (_value, key) { queryKeys.push(key); });
-    return base.protocol === "https:" && base.username === "" && base.password === "" &&
-      (base.pathname === "/" || base.pathname === "") &&
-      base.search === "" && base.hash === "" && link.protocol === "https:" && link.origin === base.origin && link.pathname === expectedPath &&
-      link.username === "" && link.password === "" && link.hash === "" &&
-      tokenValues.length === 1 && queryKeys.length === 1 &&
-      /^[A-Za-z0-9_-]{40,256}$/.test(tokenValues[0]);
+    base = new URL(configuredBase);
   } catch (_error) {
-    return false;
+    return "url_parse_error";
   }
+  try {
+    link = new URL(actionUrl);
+  } catch (_error) {
+    return "url_parse_error";
+  }
+
+  if (base.protocol !== "https:") return "base_protocol";
+  if (base.username !== "" || base.password !== "") return "base_credentials";
+  if (base.pathname !== "/" && base.pathname !== "") return "base_path";
+  if (base.search !== "" || configuredBase.indexOf("?") >= 0) return "base_query";
+  if (base.hash !== "" || configuredBase.indexOf("#") >= 0) return "base_fragment";
+  if (link.protocol !== "https:") return "link_protocol";
+  if (link.origin !== base.origin) return "origin_mismatch";
+
+  var expectedPath;
+  if (messageType === "verification") expectedPath = "/verify-email";
+  else if (messageType === "password_reset") expectedPath = "/reset-password";
+  else return "path_mismatch";
+  if (link.pathname !== expectedPath) return "path_mismatch";
+  if (link.username !== "" || link.password !== "") return "link_credentials";
+  if (link.hash !== "" || actionUrl.indexOf("#") >= 0) return "link_fragment";
+
+  var tokenValues = link.searchParams.getAll("token");
+  if (tokenValues.length !== 1) return "token_count";
+  var queryKeys = [];
+  link.searchParams.forEach(function (_value, key) { queryKeys.push(key); });
+  if (queryKeys.length !== 1) return "unexpected_query";
+  if (!/^[A-Za-z0-9_-]{40,256}$/.test(tokenValues[0])) return "token_format";
+  return null;
 }
 
 function fixedMessage_(messageType, actionUrl) {

@@ -392,10 +392,20 @@ class Settings(BaseSettings):
         """Fail closed when a selected delivery provider is missing or unsafe."""
         from urllib.parse import urlsplit
 
-        app_url = urlsplit(self.application_base_url)
+        try:
+            app_url = urlsplit(self.application_base_url)
+            _ = app_url.port
+        except ValueError:
+            raise ValueError(
+                "Email configuration error: APPLICATION_BASE_URL must be a valid origin without credentials or path."
+            ) from None
         if (
             len(self.application_base_url) > 2048
             or not self.application_base_url.isascii()
+            or any(
+                character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+                for character in self.application_base_url
+            )
             or app_url.scheme not in {"http", "https"}
             or not app_url.hostname
             or app_url.username
@@ -403,6 +413,8 @@ class Settings(BaseSettings):
             or app_url.path not in {"", "/"}
             or app_url.query
             or app_url.fragment
+            or "?" in self.application_base_url
+            or "#" in self.application_base_url
         ):
             raise ValueError("Email configuration error: APPLICATION_BASE_URL must be an origin without credentials or path.")
 

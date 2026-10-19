@@ -48,6 +48,27 @@ APPS_SCRIPT_RESPONSE_STATUSES = frozenset(
     }
 )
 APPS_SCRIPT_SUCCESS_STATUSES = frozenset({"sent", "duplicate_sent"})
+APPS_SCRIPT_ACTION_URL_REASONS = frozenset(
+    {
+        "base_whitespace",
+        "base_protocol",
+        "base_credentials",
+        "base_path",
+        "base_query",
+        "base_fragment",
+        "link_whitespace",
+        "link_protocol",
+        "origin_mismatch",
+        "path_mismatch",
+        "link_credentials",
+        "link_fragment",
+        "token_count",
+        "unexpected_query",
+        "token_format",
+        "url_parse_error",
+        "unrecognized_reason",
+    }
+)
 APPS_SCRIPT_CLIENT_OUTCOMES = frozenset(
     {
         "timeout",
@@ -91,7 +112,16 @@ def build_action_url(base_url: str, message_type: str, token: str) -> str:
     """Build links for the frontend routes verified in App.tsx."""
     if message_type not in {"verification", "password_reset"}:
         raise ValueError("Unsupported authentication email type")
-    parsed = urlsplit(base_url)
+    if not isinstance(base_url, str) or any(
+        character.isspace() or ord(character) < 0x20 or ord(character) == 0x7F
+        for character in base_url
+    ):
+        raise ValueError("APPLICATION_BASE_URL must be a clean origin")
+    try:
+        parsed = urlsplit(base_url)
+        _ = parsed.port
+    except ValueError:
+        raise ValueError("APPLICATION_BASE_URL must be a valid origin") from None
     if (
         parsed.scheme not in {"http", "https"}
         or not parsed.hostname
@@ -100,9 +130,9 @@ def build_action_url(base_url: str, message_type: str, token: str) -> str:
         or parsed.password
         or parsed.query
         or parsed.fragment
+        or "?" in base_url
+        or "#" in base_url
         or not base_url.isascii()
-        or "\n" in base_url
-        or "\r" in base_url
     ):
         raise ValueError("APPLICATION_BASE_URL must be an origin without credentials, query, or fragment")
     if len(base_url) > 2048:
@@ -351,6 +381,18 @@ class AppsScriptEmailService(BaseEmailService):
         relay_status = result.get("status")
         if not isinstance(relay_status, str) or relay_status not in APPS_SCRIPT_RESPONSE_STATUSES:
             return "unexpected_status"
+        if relay_status == "invalid_action_url":
+            relay_reason = result.get("reason")
+            safe_reason = (
+                relay_reason
+                if isinstance(relay_reason, str) and relay_reason in APPS_SCRIPT_ACTION_URL_REASONS
+                else "unrecognized_reason"
+            )
+            logger.warning(
+                "Apps Script relay validation status=%s reason=%s",
+                relay_status,
+                safe_reason,
+            )
         return relay_status
 
 
