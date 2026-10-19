@@ -154,7 +154,8 @@ def test_python_generated_action_urls_pass_apps_script_validator_offline(message
     node_script = r"""
       const fs = require('node:fs')
       const vm = require('node:vm')
-      const context = vm.createContext({ URL, Math, Number, Object, Array, String, JSON, RegExp, isFinite })
+      // Apps Script V8 does not expose browser URL or URLSearchParams globals.
+      const context = vm.createContext({ Math, Number, Object, Array, String, JSON, RegExp, isFinite })
       vm.runInContext(fs.readFileSync('integrations/apps-script-email-relay/Code.gs', 'utf8'), context)
       let input = ''
       process.stdin.setEncoding('utf8')
@@ -186,7 +187,7 @@ def test_python_generated_action_urls_pass_apps_script_validator_offline(message
         check=False,
     )
     assert result.returncode == 0, "Apps Script URL validator test harness failed"
-    assert result.stdout == "valid", "Python-generated action URL was rejected by Apps Script"
+    assert result.stdout == "valid", "Python-generated action URL was rejected by the Apps Script-compatible parser"
 
 
 @pytest.mark.parametrize(

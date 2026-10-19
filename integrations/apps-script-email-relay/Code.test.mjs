@@ -47,7 +47,6 @@ function createRelay({
   }
   const context = vm.createContext({
     Date: FakeDate,
-    URL,
     Math,
     Number,
     Object,
@@ -223,6 +222,8 @@ test('classifies recipient and action URL validation failures separately', () =>
 
 test('reports only allowlisted action URL validation reasons', () => {
   const relay = createRelay()
+  assert.equal(typeof relay.context.URL, 'undefined')
+  assert.equal(typeof relay.context.URLSearchParams, 'undefined')
   const validUrl = `https://dataset.example/verify-email?token=${token}`
   const cases = [
     ['https://dataset.example/verify-email?token=' + token, 'http://dataset.example', 'verification', 'base_protocol'],
@@ -252,6 +253,13 @@ test('reports only allowlisted action URL validation reasons', () => {
 
   const normalizedOrigin = `https://DATASET.EXAMPLE:443/verify-email?token=${token}`
   assert.equal(relay.context.actionUrlValidationReason_(normalizedOrigin, 'https://dataset.example', 'verification'), null)
+  const emptyPortOrigin = `https://DATASET.EXAMPLE:/verify-email?token=${token}`
+  assert.equal(relay.context.actionUrlValidationReason_(emptyPortOrigin, 'https://dataset.example:000443', 'verification'), null)
+  const normalizedIpv6Origin = 'https://[2001:0db8:0:0:0:0:0:1]:443/verify-email?token=' + token
+  assert.equal(
+    relay.context.actionUrlValidationReason_(normalizedIpv6Origin, 'https://[2001:db8::1]', 'verification'),
+    null,
+  )
   const safeFallback = relay.context.relayResponse_(0, 'action_url_rejected', 'invalid_action_url', 'untrusted-provider-value')
   assert.equal(JSON.parse(safeFallback.getContent()).reason, 'url_parse_error')
   assert.equal(relay.sent.length, 0)

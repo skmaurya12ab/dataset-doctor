@@ -267,25 +267,16 @@ function actionUrlValidationReason_(actionUrl, configuredBase, messageType) {
   if (typeof configuredBase !== "string" || /[\s\u0000-\u001f\u007f]/.test(configuredBase)) return "base_whitespace";
   if (typeof actionUrl !== "string" || /[\s\u0000-\u001f\u007f]/.test(actionUrl)) return "link_whitespace";
 
-  var base;
-  var link;
-  try {
-    base = new URL(configuredBase);
-  } catch (_error) {
-    return "url_parse_error";
-  }
-  try {
-    link = new URL(actionUrl);
-  } catch (_error) {
-    return "url_parse_error";
-  }
+  var base = parseAbsoluteUrlParts_(configuredBase);
+  var link = parseAbsoluteUrlParts_(actionUrl);
+  if (!base || !link) return "url_parse_error";
 
-  if (base.protocol !== "https:") return "base_protocol";
-  if (base.username !== "" || base.password !== "") return "base_credentials";
+  if (base.scheme !== "https") return "base_protocol";
+  if (base.hasCredentials) return "base_credentials";
   if (base.pathname !== "/" && base.pathname !== "") return "base_path";
-  if (base.search !== "" || configuredBase.indexOf("?") >= 0) return "base_query";
-  if (base.hash !== "" || configuredBase.indexOf("#") >= 0) return "base_fragment";
-  if (link.protocol !== "https:") return "link_protocol";
+  if (base.hasQuery) return "base_query";
+  if (base.hasFragment) return "base_fragment";
+  if (link.scheme !== "https") return "link_protocol";
   if (link.origin !== base.origin) return "origin_mismatch";
 
   var expectedPath;
@@ -293,16 +284,158 @@ function actionUrlValidationReason_(actionUrl, configuredBase, messageType) {
   else if (messageType === "password_reset") expectedPath = "/reset-password";
   else return "path_mismatch";
   if (link.pathname !== expectedPath) return "path_mismatch";
-  if (link.username !== "" || link.password !== "") return "link_credentials";
-  if (link.hash !== "" || actionUrl.indexOf("#") >= 0) return "link_fragment";
+  if (link.hasCredentials) return "link_credentials";
+  if (link.hasFragment) return "link_fragment";
 
-  var tokenValues = link.searchParams.getAll("token");
-  if (tokenValues.length !== 1) return "token_count";
-  var queryKeys = [];
-  link.searchParams.forEach(function (_value, key) { queryKeys.push(key); });
-  if (queryKeys.length !== 1) return "unexpected_query";
-  if (!/^[A-Za-z0-9_-]{40,256}$/.test(tokenValues[0])) return "token_format";
+  var queryParts = link.hasQuery && link.query !== "" ? link.query.split("&") : [];
+  var tokenCount = 0;
+  var tokenValue = "";
+  for (var i = 0; i < queryParts.length; i += 1) {
+    var equalsAt = queryParts[i].indexOf("=");
+    var key = equalsAt < 0 ? queryParts[i] : queryParts[i].substring(0, equalsAt);
+    if (key === "token") {
+      tokenCount += 1;
+      tokenValue = equalsAt < 0 ? "" : queryParts[i].substring(equalsAt + 1);
+    }
+  }
+  if (tokenCount !== 1) return "token_count";
+  if (queryParts.length !== 1) return "unexpected_query";
+  if (!/^[A-Za-z0-9_-]{40,256}$/.test(tokenValue)) return "token_format";
   return null;
+}
+
+// Apps Script V8 does not provide the browser URL or URLSearchParams APIs.
+// Parse only the absolute URL subset used by the relay, failing closed for
+// ambiguous forms instead of depending on a web-runtime global.
+function parseAbsoluteUrlParts_(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096 ||
+      /[\s\u0000-\u001f\u007f\\]/.test(value)) return null;
+
+  var schemeMatch = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//.exec(value);
+  if (!schemeMatch) return null;
+  var scheme = schemeMatch[1].toLowerCase();
+  var authorityStart = schemeMatch[0].length;
+  var tail = value.substring(authorityStart);
+  var authorityEnd = tail.search(/[\/?#]/);
+  if (authorityEnd < 0) authorityEnd = tail.length;
+  var authority = tail.substring(0, authorityEnd);
+  if (!authority) return null;
+
+  var hasCredentials = authority.indexOf("@") >= 0;
+  var hostAndPort = hasCredentials ? authority.substring(authority.lastIndexOf("@") + 1) : authority;
+  if (!hostAndPort) return null;
+
+  var host;
+  var portText = null;
+  if (hostAndPort.charAt(0) === "[") {
+    var bracketMatch = /^(\[[0-9A-Fa-f:.]+\])(?::([0-9]*))?$/.exec(hostAndPort);
+    if (!bracketMatch) return null;
+    var ipv6 = canonicalIpv6_(bracketMatch[1].substring(1, bracketMatch[1].length - 1));
+    if (ipv6 === null) return null;
+    host = "[" + ipv6 + "]";
+    portText = bracketMatch[2] === undefined ? null : bracketMatch[2];
+  } else {
+    var hostPortMatch = /^([^:\[\]]+)(?::([0-9]*))?$/.exec(hostAndPort);
+    if (!hostPortMatch) return null;
+    host = hostPortMatch[1].toLowerCase();
+    portText = hostPortMatch[2] === undefined ? null : hostPortMatch[2];
+    if (!validDnsStyleHost_(host)) return null;
+  }
+
+  var port = null;
+  if (portText !== null && portText !== "") {
+    port = 0;
+    for (var p = 0; p < portText.length; p += 1) {
+      port = port * 10 + Number(portText.charAt(p));
+      if (port > 65535) return null;
+    }
+  }
+
+  var remainder = tail.substring(authorityEnd);
+  var fragmentAt = remainder.indexOf("#");
+  var hasFragment = fragmentAt >= 0;
+  var fragment = hasFragment ? remainder.substring(fragmentAt + 1) : "";
+  var beforeFragment = hasFragment ? remainder.substring(0, fragmentAt) : remainder;
+  var queryAt = beforeFragment.indexOf("?");
+  var hasQuery = queryAt >= 0;
+  var query = hasQuery ? beforeFragment.substring(queryAt + 1) : "";
+  var pathAndBeforeQuery = hasQuery ? beforeFragment.substring(0, queryAt) : beforeFragment;
+  var pathname = pathAndBeforeQuery || "";
+  if (pathname !== "" && pathname.charAt(0) !== "/") return null;
+
+  var defaultPort = scheme === "https" ? 443 : (scheme === "http" ? 80 : null);
+  var normalizedPort = port === null || port === defaultPort ? "" : ":" + String(port);
+  return {
+    scheme: scheme,
+    host: host,
+    origin: scheme + "://" + host + normalizedPort,
+    hasCredentials: hasCredentials,
+    pathname: pathname,
+    hasQuery: hasQuery,
+    query: query,
+    hasFragment: hasFragment,
+    fragment: fragment
+  };
+}
+
+function validDnsStyleHost_(host) {
+  if (host.length === 0 || host.length > 253 || host.indexOf("..") >= 0) return false;
+  var labels = host.charAt(host.length - 1) === "." ? host.substring(0, host.length - 1).split(".") : host.split(".");
+  if (labels.length === 0) return false;
+  for (var i = 0; i < labels.length; i += 1) {
+    if (labels[i].length === 0 || labels[i].length > 63 ||
+        !/^[a-z0-9_](?:[a-z0-9_-]*[a-z0-9_])?$/.test(labels[i])) return false;
+  }
+  return true;
+}
+
+function canonicalIpv6_(address) {
+  if (!address || address.indexOf("%") >= 0) return null;
+  var normalizedAddress = address.toLowerCase();
+  if (normalizedAddress.indexOf(".") >= 0) {
+    var lastColon = normalizedAddress.lastIndexOf(":");
+    if (lastColon < 0) return null;
+    var ipv4 = normalizedAddress.substring(lastColon + 1).split(".");
+    if (ipv4.length !== 4) return null;
+    var octets = [];
+    for (var i = 0; i < ipv4.length; i += 1) {
+      if (!/^(0|[1-9][0-9]{0,2})$/.test(ipv4[i])) return null;
+      var octet = Number(ipv4[i]);
+      if (octet > 255) return null;
+      octets.push(octet);
+    }
+    var high = ((octets[0] << 8) | octets[1]).toString(16);
+    var low = ((octets[2] << 8) | octets[3]).toString(16);
+    normalizedAddress = normalizedAddress.substring(0, lastColon + 1) + high + ":" + low;
+  }
+
+  var compressionAt = normalizedAddress.indexOf("::");
+  if (compressionAt >= 0 && normalizedAddress.lastIndexOf("::") !== compressionAt) return null;
+  var groups = normalizedAddress.split(":");
+  var nonemptyGroups = [];
+  for (var j = 0; j < groups.length; j += 1) {
+    if (groups[j] !== "") {
+      if (!/^[0-9a-f]{1,4}$/.test(groups[j])) return null;
+      nonemptyGroups.push(parseInt(groups[j], 16));
+    }
+  }
+  if (compressionAt >= 0) {
+    if (nonemptyGroups.length >= 8) return null;
+    var zeros = 8 - nonemptyGroups.length;
+    var leftText = normalizedAddress.substring(0, compressionAt);
+    var leftGroups = leftText === "" ? [] : leftText.split(":");
+    var canonicalGroups = [];
+    for (var k = 0; k < leftGroups.length; k += 1) canonicalGroups.push(parseInt(leftGroups[k], 16));
+    for (var z = 0; z < zeros; z += 1) canonicalGroups.push(0);
+    var rightText = normalizedAddress.substring(compressionAt + 2);
+    var rightGroups = rightText === "" ? [] : rightText.split(":");
+    for (var r = 0; r < rightGroups.length; r += 1) canonicalGroups.push(parseInt(rightGroups[r], 16));
+    if (canonicalGroups.length !== 8) return null;
+    nonemptyGroups = canonicalGroups;
+  } else if (nonemptyGroups.length !== 8) {
+    return null;
+  }
+  return nonemptyGroups.map(function (group) { return group.toString(16); }).join(":");
 }
 
 function fixedMessage_(messageType, actionUrl) {
