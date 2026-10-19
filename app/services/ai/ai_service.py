@@ -175,10 +175,12 @@ class AIService:
                 select(AIReport)
                 .where(
                     AIReport.analysis_run_id == run_id,
+                    AIReport.provider == self.provider.provider_name,
                     AIReport.provider_model == self.provider.model_name,
                     AIReport.prompt_version == REMEDIATION_PLAN_PROMPT_VERSION,
                 )
-                .order_by(AIReport.created_at.desc())
+                .order_by(AIReport.created_at.desc(), AIReport.id.desc())
+                .limit(1)
             )
             report_res = await db.execute(report_query)
             cached_report = report_res.scalar_one_or_none()
@@ -231,6 +233,7 @@ class AIService:
         # 8. Persist AIReport record
         report = AIReport(
             analysis_run_id=run.id,
+            provider=self.provider.provider_name,
             provider_model=self.provider.model_name,
             prompt_version=REMEDIATION_PLAN_PROMPT_VERSION,
             executive_summary=parsed.executive_summary,
@@ -258,7 +261,8 @@ class AIService:
         report_query = (
             select(AIReport)
             .where(AIReport.analysis_run_id == run_id)
-            .order_by(AIReport.created_at.desc())
+            .order_by(AIReport.created_at.desc(), AIReport.id.desc())
+            .limit(1)
         )
         report_res = await db.execute(report_query)
         report = report_res.scalar_one_or_none()
@@ -276,7 +280,7 @@ class AIService:
         return AIReportResponse(
             id=report.id,
             analysis_run_id=report.analysis_run_id,
-            provider=self.provider.provider_name,
+            provider=report.provider,
             model=report.provider_model,
             prompt_version=report.prompt_version,
             executive_summary=report.executive_summary,

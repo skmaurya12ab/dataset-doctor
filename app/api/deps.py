@@ -54,7 +54,7 @@ def get_llm_provider(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> "BaseLLMProvider":
     """Dependency provider for the abstract BaseLLMProvider."""
-    from app.services.ai.mock_provider import MockLLMProvider
+    from app.services.ai.mock_provider import MOCK_MODEL_NAME, MockLLMProvider
     from app.services.ai.openai_provider import OpenAIResponsesProvider
 
     if settings.openai_api_key:
@@ -66,7 +66,7 @@ def get_llm_provider(
             retry_backoff=settings.openai_retry_backoff,
             max_output_tokens=settings.openai_max_output_tokens,
         )
-    return MockLLMProvider(model_name=settings.openai_model)
+    return MockLLMProvider(model_name=MOCK_MODEL_NAME)
 
 
 def get_ai_service(

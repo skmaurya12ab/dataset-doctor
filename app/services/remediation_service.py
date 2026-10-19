@@ -27,6 +27,10 @@ from app.services.remediation_executor import RemediationExecutor, compute_snaps
 
 logger = get_logger(__name__)
 
+# The application currently has one production AI provider. Unknown and mock
+# provenance must fail closed before a report can create an execution.
+TRUSTED_REMEDIATION_PROVIDERS = frozenset({"openai-responses"})
+
 
 class RemediationService:
     """Manages the full lifecycle of human-approved, deterministic remediation execution."""
@@ -80,6 +84,12 @@ class RemediationService:
         if report.analysis_run_id != run_id:
             raise ValidationException(
                 f"AIReport '{request.ai_report_id}' belongs to AnalysisRun '{report.analysis_run_id}', not '{run_id}'."
+            )
+
+        if report.provider not in TRUSTED_REMEDIATION_PROVIDERS:
+            raise ValidationException(
+                "Only reports from a verified AI provider can be applied; "
+                f"report provenance is '{report.provider or 'unknown'}'."
             )
 
         # 4. Check for existing completed execution (Idempotency Protection)

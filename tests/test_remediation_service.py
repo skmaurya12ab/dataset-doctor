@@ -64,6 +64,7 @@ async def setup_remediation_environment(test_db_session: AsyncSession, test_stor
     report = AIReport(
         id=uuid.uuid4(),
         analysis_run_id=run.id,
+        provider="openai-responses",
         provider_model="mock-gpt",
         prompt_version="1.0.0",
         executive_summary="Summary",
@@ -158,6 +159,33 @@ async def test_apply_remediation_requires_approval(test_db_session: AsyncSession
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["mock-provider", "unknown"])
+async def test_apply_remediation_rejects_untrusted_provenance(
+    test_db_session: AsyncSession,
+    setup_remediation_environment,
+    provider: str,
+):
+    env = setup_remediation_environment
+    env["report"].provider = provider
+    await test_db_session.commit()
+
+    service = RemediationService(storage=env["storage"])
+    req = RemediationApplyRequest(ai_report_id=env["report"].id, approval=True)
+
+    with pytest.raises(ValidationException, match="Only reports from a verified AI provider can be applied"):
+        await service.apply_remediation(test_db_session, env["run"].id, req)
+
+    executions = await test_db_session.execute(
+        select(RemediationExecution).where(RemediationExecution.analysis_run_id == env["run"].id)
+    )
+    assert executions.scalars().all() == []
+    versions = await test_db_session.execute(
+        select(DatasetVersion).where(DatasetVersion.dataset_id == env["dataset"].id)
+    )
+    assert len(versions.scalars().all()) == 1
+
+
+@pytest.mark.asyncio
 async def test_apply_remediation_idempotency(test_db_session: AsyncSession, setup_remediation_environment):
     env = setup_remediation_environment
     service = RemediationService(storage=env["storage"])
@@ -185,6 +213,7 @@ async def test_apply_remediation_target_protection(test_db_session: AsyncSession
     bad_report = AIReport(
         id=uuid.uuid4(),
         analysis_run_id=env["run"].id,
+        provider="openai-responses",
         provider_model="mock-gpt",
         prompt_version="1.0.0",
         executive_summary="Malicious drop",
@@ -236,6 +265,7 @@ async def test_remediation_chaining_v1_to_v2_to_v3(test_db_session: AsyncSession
     report2 = AIReport(
         id=uuid.uuid4(),
         analysis_run_id=run2.id,
+        provider="openai-responses",
         provider_model="mock-gpt",
         prompt_version="1.0.0",
         executive_summary="Second remediation",

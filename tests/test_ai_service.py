@@ -224,6 +224,53 @@ async def test_generate_ai_plan_success_and_caching(
     assert plan3.cached is False
     assert provider.call_count == 2
 
+    # A later non-forced request reuses the newest forced-regeneration result.
+    plan4 = await service.generate_remediation_plan(
+        db=test_db_session,
+        run_id=run.id,
+        force_regenerate=False,
+    )
+    assert plan4.cached is True
+    assert plan4.id == plan3.id
+    assert provider.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_remediation_plan_cache_and_retrieval_preserve_provider_provenance(
+    test_db_session: AsyncSession,
+    setup_test_analysis: tuple[AnalysisRun, QualityIssue],
+):
+    """Same model names from different providers must not share or mislabel cached plans."""
+    run, _ = setup_test_analysis
+
+    class OpenAILabeledMockProvider(MockLLMProvider):
+        @property
+        def provider_name(self) -> str:
+            return "openai"
+
+    mock_provider = MockLLMProvider(model_name="same-model")
+    openai_provider = OpenAILabeledMockProvider(model_name="same-model")
+    mock_service = AIService(provider=mock_provider)
+    openai_service = AIService(provider=openai_provider)
+
+    mock_plan = await mock_service.generate_remediation_plan(test_db_session, run.id)
+    assert mock_plan.provider == "mock-provider"
+
+    openai_plan = await openai_service.generate_remediation_plan(test_db_session, run.id)
+    assert openai_plan.provider == "openai"
+    assert openai_plan.id != mock_plan.id
+    assert openai_provider.call_count == 1
+
+    mock_cache_hit = await mock_service.generate_remediation_plan(test_db_session, run.id)
+    assert mock_cache_hit.cached is True
+    assert mock_cache_hit.id == mock_plan.id
+    assert mock_cache_hit.provider == "mock-provider"
+    assert mock_provider.call_count == 1
+
+    latest = await mock_service.get_latest_remediation_plan(test_db_session, run.id)
+    assert latest.id == openai_plan.id
+    assert latest.provider == "openai"
+
 
 @pytest.mark.asyncio
 async def test_generate_ai_plan_incomplete_run_rejected(

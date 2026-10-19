@@ -18,6 +18,7 @@ from app.services.ai.prompts.remediation_plan import build_remediation_plan_prom
 from app.services.ai_provider import BaseLLMProvider, LLMResponseResult, LLMUsage
 
 T = TypeVar("T", bound=BaseModel)
+MOCK_MODEL_NAME = "mock-sample-v1"
 
 
 class MockLLMProvider(BaseLLMProvider):
@@ -25,7 +26,7 @@ class MockLLMProvider(BaseLLMProvider):
 
     def __init__(
         self,
-        model_name: str = "mock-gpt-4o",
+        model_name: str = MOCK_MODEL_NAME,
         canned_explanation: Optional[FindingExplanation] = None,
         canned_report: Optional[AIReportContent] = None,
         simulate_refusal: Optional[str] = None,

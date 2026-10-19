@@ -20,6 +20,23 @@ import { ApprovalModal } from '../components/ApprovalModal'
 import { RemediationStatusBadge } from '../components/RemediationStatusBadge'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 
+function getHttpStatus(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object' || !('response' in error)) return undefined
+  const response = (error as { response?: { status?: unknown } }).response
+  return typeof response?.status === 'number' ? response.status : undefined
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return getHttpStatus(error) === 404
+}
+
+function apiFailureMessage(action: string, error: unknown): string {
+  const status = getHttpStatus(error)
+  return status
+    ? `${action} (HTTP ${status}). Please try again.`
+    : `${action}. Please try again.`
+}
+
 export const RemediationPage: React.FC = () => {
   const [searchParams] = useSearchParams()
   const runId = searchParams.get('runId')
@@ -33,11 +50,15 @@ export const RemediationPage: React.FC = () => {
   const [isApplying, setIsApplying] = useState(false)
   const [isApprovalOpen, setIsApprovalOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [planLoadFailed, setPlanLoadFailed] = useState(false)
+  const isMockReport = aiReport?.provider === 'mock-provider'
+  const isUnverifiedReport = Boolean(aiReport && aiReport.provider !== 'openai-responses')
 
   const loadData = useCallback(async (rId: string) => {
     try {
       setIsLoading(true)
       setError(null)
+      setPlanLoadFailed(false)
 
       const run = await api.getAnalysisRun(rId)
       setAnalysisRun(run)
@@ -46,12 +67,14 @@ export const RemediationPage: React.FC = () => {
       try {
         const report = await api.getAIPlan(rId)
         setAiReport(report)
-      } catch {
-        // Plan doesn't exist yet; user can click generate
+      } catch (err: unknown) {
+        if (!isNotFoundError(err)) {
+          setPlanLoadFailed(true)
+          setError(apiFailureMessage('Could not load the saved remediation plan', err))
+        }
       }
     } catch (err: unknown) {
-      const errObj = err as { message?: string }
-      setError(errObj.message || 'Failed to load analysis for remediation.')
+      setError(apiFailureMessage('Could not load the analysis for remediation', err))
     } finally {
       setIsLoading(false)
     }
@@ -81,16 +104,16 @@ export const RemediationPage: React.FC = () => {
       setError(null)
       const report = await api.generateAIPlan(analysisRun.id, force)
       setAiReport(report)
+      setPlanLoadFailed(false)
     } catch (err: unknown) {
-      const errObj = err as { message?: string }
-      setError(errObj.message || 'Failed to generate remediation plan.')
+      setError(apiFailureMessage('Could not synthesize the remediation plan', err))
     } finally {
       setIsGeneratingPlan(false)
     }
   }
 
   const handleApproveAndApply = async (approvedBy: string) => {
-    if (!analysisRun || !aiReport) return
+    if (!analysisRun || !aiReport || isUnverifiedReport) return
     try {
       setIsApplying(true)
       setIsApprovalOpen(false)
@@ -187,7 +210,7 @@ export const RemediationPage: React.FC = () => {
               <RemediationStatusBadge status={execution.status} />
             ) : aiReport ? (
               <span className="badge font-mono" style={{ backgroundColor: 'var(--severity-medium-bg)', color: 'var(--severity-medium)' }}>
-                PENDING APPROVAL
+                {isUnverifiedReport ? 'UNVERIFIED SAMPLE' : 'PENDING APPROVAL'}
               </span>
             ) : (
               <span className="badge font-mono" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
@@ -204,7 +227,7 @@ export const RemediationPage: React.FC = () => {
 
         {/* Top Actions */}
         <div style={{ display: 'flex', gap: '10px' }}>
-          {aiReport && !execution && (
+          {aiReport && !execution && !isUnverifiedReport && (
             <button
               className="btn btn-primary"
               onClick={() => setIsApprovalOpen(true)}
@@ -225,6 +248,37 @@ export const RemediationPage: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {isUnverifiedReport && (
+        <div
+          className="card"
+          role="note"
+          style={{
+            borderColor: 'var(--severity-medium-border)',
+            backgroundColor: 'var(--severity-medium-bg)',
+            color: 'var(--severity-medium)',
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '10px',
+            fontSize: '13px',
+          }}
+        >
+          <AlertCircle size={16} />
+          <div>
+            {isMockReport ? (
+              <>
+                <strong>Local mock-provider output — sample only.</strong>{' '}
+                Provider: {aiReport.provider}; model: {aiReport.model || 'unknown'}. The canned examples may not match this analysis. Do not treat these proposals as dataset-specific recommendations; this page disables approval and application for mock output.
+              </>
+            ) : (
+              <>
+                <strong>Provider provenance unavailable — unverified result.</strong>{' '}
+                Provider: {aiReport?.provider || 'unknown'}; model: {aiReport?.model || 'unknown'}. Regenerate this plan with a configured provider before relying on its recommendations. Approval and application are disabled.
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {error && (
         <div
@@ -342,10 +396,10 @@ export const RemediationPage: React.FC = () => {
       ) : aiReport && planContent ? (
         <RemediationPlanView
           plan={planContent}
-          onOpenApprovalModal={() => setIsApprovalOpen(true)}
+          onOpenApprovalModal={isUnverifiedReport ? undefined : () => setIsApprovalOpen(true)}
           isExecutionDisabled={isApplying || Boolean(execution && execution.status === 'COMPLETED')}
         />
-      ) : (
+      ) : planLoadFailed ? null : (
         <div
           className="card"
           style={{
@@ -374,7 +428,7 @@ export const RemediationPage: React.FC = () => {
       )}
 
       {/* Explicit Human Approval Modal */}
-      {aiReport && (
+      {aiReport && !isUnverifiedReport && (
         <ApprovalModal
           isOpen={isApprovalOpen}
           onClose={() => setIsApprovalOpen(false)}

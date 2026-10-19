@@ -36,6 +36,12 @@ class AIReport(Base):
         nullable=False,
         index=True,
     )
+    provider: Mapped[str] = mapped_column(
+        String(64),
+        default="unknown",
+        server_default="unknown",
+        nullable=False,
+    )
     prompt_version: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

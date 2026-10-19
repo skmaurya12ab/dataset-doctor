@@ -81,6 +81,7 @@ async def api_remediation_env(test_db_session: AsyncSession, test_storage: FileS
     report = AIReport(
         id=uuid.uuid4(),
         analysis_run_id=run.id,
+        provider="openai-responses",
         provider_model="mock-gpt",
         prompt_version="1.0.0",
         executive_summary="Plan summary",
@@ -159,6 +160,27 @@ async def test_apply_remediation_api_requires_explicit_approval(async_client: As
 
     res = await async_client.post(f"/api/v1/analyses/{run_id}/remediations/apply", json=payload)
     assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("provider", ["mock-provider", "unknown"])
+async def test_apply_remediation_api_rejects_untrusted_provenance(
+    async_client: AsyncClient,
+    api_remediation_env,
+    test_db_session: AsyncSession,
+    provider: str,
+):
+    report = api_remediation_env["report"]
+    report.provider = provider
+    await test_db_session.commit()
+
+    response = await async_client.post(
+        f"/api/v1/analyses/{api_remediation_env['run'].id}/remediations/apply",
+        json={"ai_report_id": str(report.id), "approval": True},
+    )
+
+    assert response.status_code == 422
+    assert "Only reports from a verified AI provider can be applied" in response.json()["detail"]
 
 
 @pytest.mark.asyncio

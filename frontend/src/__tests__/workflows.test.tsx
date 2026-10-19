@@ -1,6 +1,6 @@
 import React from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { OverviewPage } from '../pages/OverviewPage'
 import { DatasetsPage } from '../pages/DatasetsPage'
@@ -192,7 +192,7 @@ describe('RemediationPage Workflow & Blank Screen Regression', () => {
     id: 'rep-999',
     analysis_run_id: 'run-987',
     provider: 'mock-provider',
-    model: 'gpt-4o-2024-08-06',
+    model: 'mock-sample-v1',
     prompt_version: '1.0.0',
     executive_summary: 'Comprehensive remediation plan synthesized from deterministic quality findings.',
     risk_assessment: [
@@ -246,9 +246,37 @@ describe('RemediationPage Workflow & Blank Screen Regression', () => {
       expect(screen.getByText(/Comprehensive remediation plan synthesized/i)).toBeInTheDocument()
       expect(screen.getByText(/Proposed Transformations \(1\)/i)).toBeInTheDocument()
       expect(screen.getByText(/#1 IMPUTE/i)).toBeInTheDocument()
-      expect(screen.getAllByText(/Review & Approve Plan/i).length).toBeGreaterThanOrEqual(1)
+      expect(screen.getByText(/Local mock-provider output — sample only/i)).toBeInTheDocument()
+      expect(screen.getByText(/Provider: mock-provider; model: mock-sample-v1/i)).toBeInTheDocument()
+      expect(screen.getByText(/UNVERIFIED SAMPLE/i)).toBeInTheDocument()
+      expect(screen.queryByText(/Review & Approve Plan/i)).not.toBeInTheDocument()
     })
   })
+
+  it.each(['unknown', 'unrecognized-provider'])(
+    'marks reports with unsupported provider provenance (%s) as unverified and non-approvable',
+    async (provider) => {
+    vi.mocked(api.getAnalysisRun).mockResolvedValue(mockRun)
+    vi.mocked(api.getAIPlan).mockResolvedValue({
+      ...rawBackendAIReport,
+      provider,
+    } as unknown as AIReport)
+
+    render(
+      <MemoryRouter initialEntries={['/remediation?runId=run-987']}>
+        <Routes>
+          <Route path="/remediation" element={<RemediationPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Provider provenance unavailable — unverified result/i)).toBeInTheDocument()
+      expect(screen.getByText(/UNVERIFIED SAMPLE/i)).toBeInTheDocument()
+      expect(screen.queryByText(/Review & Approve Plan/i)).not.toBeInTheDocument()
+    })
+    },
+  )
 
   it('renders RemediationPage on direct /remediation without runId by falling back to latest completed analysis', async () => {
     const mockOverview: OverviewStats = {
@@ -279,8 +307,8 @@ describe('RemediationPage Workflow & Blank Screen Regression', () => {
     })
   })
 
-  it('renders meaningful error card inside layout when analysis run fetch fails', async () => {
-    vi.mocked(api.getAnalysisRun).mockRejectedValue(new Error('Network error 502 Bad Gateway'))
+  it('renders a safe status message inside layout when analysis run fetch fails', async () => {
+    vi.mocked(api.getAnalysisRun).mockRejectedValue({ response: { status: 502 } })
 
     render(
       <MemoryRouter initialEntries={['/remediation?runId=invalid-run']}>
@@ -291,14 +319,13 @@ describe('RemediationPage Workflow & Blank Screen Regression', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText(/Failed to load analysis for remediation/i)).toBeInTheDocument()
-      expect(screen.getByText(/Network error 502 Bad Gateway/i)).toBeInTheDocument()
+      expect(screen.getByText(/Could not load the analysis for remediation \(HTTP 502\)/i)).toBeInTheDocument()
     })
   })
 
   it('renders empty prompt CTA when analysis run has no AI plan yet', async () => {
     vi.mocked(api.getAnalysisRun).mockResolvedValue(mockRun)
-    vi.mocked(api.getAIPlan).mockRejectedValue(new Error('404 Not Found'))
+    vi.mocked(api.getAIPlan).mockRejectedValue({ response: { status: 404 } })
 
     render(
       <MemoryRouter initialEntries={['/remediation?runId=run-987']}>
@@ -311,6 +338,44 @@ describe('RemediationPage Workflow & Blank Screen Regression', () => {
     await waitFor(() => {
       expect(screen.getByText('No Remediation Plan Synthesized Yet')).toBeInTheDocument()
       expect(screen.getByText(/Synthesize Advisory Plan/i)).toBeInTheDocument()
+    })
+  })
+
+  it('surfaces saved-plan retrieval failures instead of treating them as an empty result', async () => {
+    vi.mocked(api.getAnalysisRun).mockResolvedValue(mockRun)
+    vi.mocked(api.getAIPlan).mockRejectedValue({ response: { status: 503 } })
+
+    render(
+      <MemoryRouter initialEntries={['/remediation?runId=run-987']}>
+        <Routes>
+          <Route path="/remediation" element={<RemediationPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not load the saved remediation plan \(HTTP 503\)/i)).toBeInTheDocument()
+      expect(screen.queryByText('No Remediation Plan Synthesized Yet')).not.toBeInTheDocument()
+    })
+  })
+
+  it('surfaces a safe provider error when plan generation fails', async () => {
+    vi.mocked(api.getAnalysisRun).mockResolvedValue(mockRun)
+    vi.mocked(api.getAIPlan).mockRejectedValue({ response: { status: 404 } })
+    vi.mocked(api.generateAIPlan).mockRejectedValue({ response: { status: 502 } })
+
+    render(
+      <MemoryRouter initialEntries={['/remediation?runId=run-987']}>
+        <Routes>
+          <Route path="/remediation" element={<RemediationPage />} />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /Synthesize Advisory Plan/i }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not synthesize the remediation plan \(HTTP 502\)/i)).toBeInTheDocument()
     })
   })
 })

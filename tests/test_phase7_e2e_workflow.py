@@ -1,21 +1,4 @@
-"""Phase 7 End-to-End Integration Workflow Test.
-
-Proves the fundamental architectural lifecycle:
-1. UPLOAD raw dataset -> Creates Immutable Dataset Version 1
-2. TRIGGER deterministic analysis -> Returns 202 Accepted
-3. WAIT FOR / RECORD analysis run completion -> Verifies total defects and ML readiness score
-4. RETRIEVE findings -> Inspects specific quality defects
-5. REQUEST AI EXPLANATION -> Receives grounded, advisory explanation using Mock LLM
-6. REQUEST AI REMEDIATION PLAN -> Proposes allowlisted transformations using Mock LLM
-7. VERIFY UNAPPROVED EXECUTION REJECTED -> Strict enforcement of human-in-the-loop boundary
-8. APPROVE PLAN -> Explicit user approval recorded
-9. EXECUTE DETERMINISTIC REMEDIATION -> Python engine applies allowlisted operations
-10. CREATE VERSION 2 -> Immutable Version 2 created with parent lineage to Version 1
-11. VERIFY VERSION 1 UNTOUCHED -> Source hash, records, and files remain completely preserved
-12. AUTOMATIC RE-ANALYSIS OF VERSION 2 -> Version 2 analysis run queued/executed
-13. COMPARE VERSION 1 vs VERSION 2 -> Defect lifecycle transitions (RESOLVED, UNCHANGED, NEW)
-14. VERIFY READINESS DELTA -> Positive score improvement verified
-"""
+"""End-to-end checks that mock-generated plans cannot cross the approval boundary."""
 
 import io
 import uuid
@@ -31,11 +14,11 @@ from app.models.remediation import RemediationExecution, RemediationExecutionSta
 
 
 @pytest.mark.asyncio
-async def test_complete_phase7_architecture_lifecycle(
+async def test_phase7_mock_plan_cannot_be_applied(
     async_client: AsyncClient,
     test_db_session: AsyncSession,
 ):
-    """Execute complete end-to-end architecture lifecycle test."""
+    """Generate a mock plan and confirm approval cannot apply it."""
 
     # --------------------------------------------------------------------------
     # Step 1: Upload dirty dataset to create Version 1
@@ -156,9 +139,7 @@ async def test_complete_phase7_architecture_lifecycle(
     )
     assert unapproved_resp.status_code in (400, 422)
 
-    # --------------------------------------------------------------------------
-    # Step 8 & 9: Explicit approval and deterministic execution
-    # --------------------------------------------------------------------------
+    # Explicit approval cannot turn mock-generated advice into verified advice.
     approved_payload = {
         "ai_report_id": ai_report_id,
         "approval": True,
@@ -168,65 +149,14 @@ async def test_complete_phase7_architecture_lifecycle(
         f"/api/v1/analyses/{run1_id}/remediations/apply",
         json=approved_payload,
     )
-    assert apply_resp.status_code == 201
-    apply_data = apply_resp.json()
-    v2_id = apply_data["result_dataset_version_id"]
-    assert apply_data["status"] == RemediationExecutionStatus.COMPLETED.value
-    assert apply_data["approved_by"] == "lead_engineer"
+    assert apply_resp.status_code == 422
+    assert "Only reports from a verified AI provider can be applied" in apply_resp.json()["detail"]
 
-    # --------------------------------------------------------------------------
-    # Step 10 & 11: Verify Version 2 lineage and Version 1 immutability
-    # --------------------------------------------------------------------------
-    v2_record = await test_db_session.get(DatasetVersion, uuid.UUID(v2_id))
-    assert v2_record.version_number == 2
-    assert str(v2_record.parent_version_id) == str(v1_id)
-
-    await test_db_session.refresh(v1_record)
-    assert v1_record.sha256_hash == v1_initial_hash
-    assert v1_record.version_number == 1
-
-    # --------------------------------------------------------------------------
-    # Step 12: Automatic re-analysis on Version 2
-    # --------------------------------------------------------------------------
-    v2_runs_stmt = select(AnalysisRun).where(AnalysisRun.dataset_version_id == uuid.UUID(v2_id))
-    v2_runs_res = await test_db_session.execute(v2_runs_stmt)
-    v2_runs = list(v2_runs_res.scalars().all())
-    assert len(v2_runs) >= 1
-    run2 = v2_runs[0]
-
-    # Simulate completed run 2 with 0 defects and improved score
-    run2.status = AnalysisStatus.COMPLETED.value
-    run2.ml_readiness_score = 92.0
-    run2.summary_metrics = {
-        "row_count": v2_record.row_count,
-        "column_count": v2_record.column_count,
-        "missing_cells": 0,
-        "missing_percentage": 0.0,
-        "duplicate_rows": 0,
-    }
-    await test_db_session.commit()
-
-    # --------------------------------------------------------------------------
-    # Step 13 & 14: Compare Version 1 vs Version 2 & verify deltas
-    # --------------------------------------------------------------------------
-    comp_resp = await async_client.get(
-        f"/api/v1/datasets/{dataset_id}/compare-versions?v1={v1_id}&v2={v2_id}",
+    executions = await test_db_session.execute(
+        select(RemediationExecution).where(RemediationExecution.analysis_run_id == uuid.UUID(run1_id))
     )
-    assert comp_resp.status_code == 200
-    comp_data = comp_resp.json()
-
-    # Verify metrics delta
-    metrics = comp_data["dataset_metrics"]
-    assert metrics["missing_cells"]["before"] == 1
-    assert metrics["missing_cells"]["after"] == 0
-    assert metrics["missing_cells"]["delta"] == -1
-
-    assert metrics["duplicate_rows"]["before"] == 1
-    assert metrics["duplicate_rows"]["after"] == 0
-    assert metrics["duplicate_rows"]["delta"] == -1
-
-    # Verify heuristic score delta
-    heuristic = comp_data["heuristic"]
-    assert heuristic["before_score"] == 65.0
-    assert heuristic["after_score"] == 92.0
-    assert heuristic["delta"] == 27.0
+    assert executions.scalars().all() == []
+    versions = await test_db_session.execute(
+        select(DatasetVersion).where(DatasetVersion.dataset_id == uuid.UUID(dataset_id))
+    )
+    assert len(versions.scalars().all()) == 1

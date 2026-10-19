@@ -5,10 +5,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 import openai
 
+from app.api.deps import get_llm_provider
+from app.core.config import Settings
 from app.models.analysis import QualityIssue
 from app.schemas.ai import AIReportContent, FindingExplanation
 from app.services.ai.findings_digest import FindingsDigest
-from app.services.ai.mock_provider import MockLLMProvider
+from app.services.ai.mock_provider import MOCK_MODEL_NAME, MockLLMProvider
 from app.services.ai.openai_provider import OpenAIResponsesProvider
 
 
@@ -289,3 +291,16 @@ async def test_openai_provider_non_retryable_bad_request():
     assert result.is_error is True
     assert "OpenAI error 400" in result.error_message
     assert mock_responses.parse.call_count == 1  # No retries for 400!
+
+
+def test_missing_openai_key_uses_synthetic_mock_model_even_when_openai_model_is_real() -> None:
+    settings = Settings(
+        environment="testing",
+        openai_api_key=None,
+        openai_model="gpt-4o-2024-08-06",
+        _env_file=None,
+    )
+    provider = get_llm_provider(settings=settings)
+    assert provider.provider_name == "mock-provider"
+    assert provider.model_name == MOCK_MODEL_NAME
+    assert provider.model_name == "mock-sample-v1"

@@ -128,11 +128,17 @@ async def test_api_generate_and_get_ai_plan(
     assert resp_get_init.status_code == 404
 
     # 2. POST /generate-ai-plan generates plan
-    resp_post = await async_client.post(f"/api/v1/analyses/{run.id}/generate-ai-plan")
+    # Match the frontend's actual request body: Axios sends an empty JSON object.
+    resp_post = await async_client.post(
+        f"/api/v1/analyses/{run.id}/generate-ai-plan",
+        json={},
+    )
     assert resp_post.status_code == 200
     post_data = resp_post.json()
     assert post_data["analysis_run_id"] == str(run.id)
     assert post_data["cached"] is False
+    assert post_data["provider"] == "mock-provider"
+    assert post_data["model"]
     assert len(post_data["transformation_specs"]) > 0
 
     # 3. GET /ai-plan now returns stored plan
@@ -141,6 +147,8 @@ async def test_api_generate_and_get_ai_plan(
     get_data = resp_get.json()
     assert get_data["id"] == post_data["id"]
     assert get_data["cached"] is True
+    assert get_data["provider"] == "mock-provider"
+    assert get_data["model"] == post_data["model"]
 
     # 4. POST with force_regenerate=true creates fresh plan
     resp_regen = await async_client.post(f"/api/v1/analyses/{run.id}/generate-ai-plan?force_regenerate=true")
@@ -148,6 +156,8 @@ async def test_api_generate_and_get_ai_plan(
     regen_data = resp_regen.json()
     assert regen_data["cached"] is False
     assert regen_data["id"] != post_data["id"]
+    assert regen_data["provider"] == post_data["provider"]
+    assert regen_data["model"] == post_data["model"]
 
 
 @pytest.mark.asyncio
