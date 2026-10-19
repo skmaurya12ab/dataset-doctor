@@ -64,7 +64,8 @@ def build_alembic_engine_configuration(
 ) -> tuple[dict[str, str], dict]:
     """Return Alembic's URL and connect args using application DB policy."""
     engine_url, connect_args = build_database_connection_configuration(settings, database_url)
-    return {"sqlalchemy.url": str(engine_url)}, connect_args
+    serialized_url = make_url(engine_url).render_as_string(hide_password=False)
+    return {"sqlalchemy.url": serialized_url}, connect_args
 
 
 def build_engine_configuration(settings) -> tuple[object, dict]:

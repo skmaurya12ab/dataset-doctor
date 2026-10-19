@@ -4,6 +4,7 @@ import ssl
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.engine import URL, make_url
 from app.core.config import Settings
 from app.core.database import (
     build_alembic_engine_configuration,
@@ -139,6 +140,36 @@ def test_production_alembic_configuration_uses_verified_system_tls() -> None:
     assert isinstance(ssl_context, ssl.SSLContext)
     assert ssl_context.verify_mode == ssl.CERT_REQUIRED
     assert ssl_context.check_hostname is True
+
+
+def test_alembic_database_url_preserves_encoded_credentials() -> None:
+    password = "fake%pass@:/?#[]"
+    original_url = URL.create(
+        drivername="postgresql+asyncpg",
+        username="fake_user",
+        password=password,
+        host="db.example",
+        port=5432,
+        database="test_database",
+        query={"sslmode": "require"},
+    ).render_as_string(hide_password=False)
+    settings = Settings(
+        environment="production",
+        database_url=original_url,
+        _env_file=None,
+    )
+
+    migration_config, _ = build_alembic_engine_configuration(settings, original_url)
+    parsed_url = make_url(migration_config["sqlalchemy.url"])
+
+    assert parsed_url.drivername == "postgresql+asyncpg"
+    assert parsed_url.username == "fake_user"
+    assert parsed_url.password == password
+    assert parsed_url.host == "db.example"
+    assert parsed_url.port == 5432
+    assert parsed_url.database == "test_database"
+    assert "%25" in migration_config["sqlalchemy.url"]
+    assert "%40" in migration_config["sqlalchemy.url"]
 
 
 def test_local_alembic_configuration_does_not_enable_tls() -> None:
