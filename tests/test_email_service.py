@@ -152,6 +152,12 @@ def test_relay_post_accepts_confirmed_response_and_rejects_non_sent_status(monke
     [
         (b'{"status":"duplicate_sent"}', "duplicate_sent"),
         (b'{"status":"unauthorized"}', "unauthorized"),
+        (b'{"status":"invalid_envelope"}', "invalid_envelope"),
+        (b'{"status":"body_too_large"}', "body_too_large"),
+        (b'{"status":"invalid_json"}', "invalid_json"),
+        (b'{"status":"invalid_payload"}', "invalid_payload"),
+        (b'{"status":"invalid_recipient"}', "invalid_recipient"),
+        (b'{"status":"invalid_action_url"}', "invalid_action_url"),
         (b'{"status":"status-from-untrusted-response"}', "unexpected_status"),
         (b'{"unexpected":"shape"}', "unexpected_status"),
         (b'not-json', "non_json_response"),
@@ -288,7 +294,18 @@ async def test_relay_normalizes_unknown_and_non_json_response_logs(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("relay_status", "expected"),
-    [("sent", True), ("duplicate_sent", True), ("delivery_unknown", False), ("unexpected_status", False)],
+    [
+        ("sent", True),
+        ("duplicate_sent", True),
+        ("delivery_unknown", False),
+        ("unexpected_status", False),
+        ("invalid_envelope", False),
+        ("body_too_large", False),
+        ("invalid_json", False),
+        ("invalid_payload", False),
+        ("invalid_recipient", False),
+        ("invalid_action_url", False),
+    ],
 )
 async def test_relay_reports_success_only_for_confirmed_sent_statuses(
     monkeypatch, relay_status: str, expected: bool

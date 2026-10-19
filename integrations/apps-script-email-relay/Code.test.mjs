@@ -100,12 +100,20 @@ function createRelay({
     return request
   }
   function post(body) {
-    return JSON.parse(context.doPost({ postData: { contents: JSON.stringify(body) } }).getContent())
+    return postRaw(JSON.stringify(body))
+  }
+  function postRaw(raw) {
+    return JSON.parse(context.doPost({ postData: { contents: raw } }).getContent())
+  }
+  function postEvent(event) {
+    return JSON.parse(context.doPost(event).getContent())
   }
   return {
     context,
     payload,
     post,
+    postRaw,
+    postEvent,
     sent,
     properties,
     diagnostics,
@@ -159,6 +167,58 @@ test('emits safe timing stages for a successful delivery path', () => {
   }
 })
 
+test('classifies request-envelope, size, JSON, and payload-shape failures safely', () => {
+  const relay = createRelay()
+  const oversized = JSON.stringify({ body: 'x'.repeat(9000) })
+  const malformed = '{"status":'
+  const missingKey = relay.payload()
+  delete missingKey.signature
+  const extraKey = { ...relay.payload(), unexpected: true }
+  const invalidType = relay.payload({ timestamp: 'not-an-integer' })
+
+  assert.equal(relay.postEvent(undefined).status, 'invalid_envelope')
+  assert.equal(relay.postEvent({}).status, 'invalid_envelope')
+  assert.equal(relay.postEvent({ postData: {} }).status, 'invalid_envelope')
+  assert.equal(relay.postEvent({ postData: { contents: null } }).status, 'invalid_envelope')
+  assert.equal(relay.postRaw(oversized).status, 'body_too_large')
+  assert.equal(relay.postRaw(malformed).status, 'invalid_json')
+  assert.equal(relay.post(missingKey).status, 'invalid_payload')
+  assert.equal(relay.post(extraKey).status, 'invalid_payload')
+  assert.equal(relay.post(invalidType).status, 'invalid_payload')
+  assert.equal(relay.sent.length, 0)
+
+  const records = relay.diagnostics.map((line) => JSON.parse(line.slice('DD_RELAY_STAGE '.length)))
+  const statuses = records.filter((record) => record.stage === 'response_returned').map((record) => record.status)
+  assert.deepEqual(statuses, [
+    'invalid_envelope', 'invalid_envelope', 'invalid_envelope', 'invalid_envelope',
+    'body_too_large', 'invalid_json', 'invalid_payload', 'invalid_payload', 'invalid_payload',
+  ])
+  for (const record of records) {
+    assert.ok(Number.isInteger(record.elapsed_ms) && record.elapsed_ms >= 0)
+    assert.ok(Object.keys(record).every((key) => ['stage', 'elapsed_ms', 'status'].includes(key)))
+  }
+  const diagnosticText = relay.diagnostics.join('\n')
+  for (const sensitiveValue of [secret, malformed, oversized, missingKey.recipient, missingKey.action_url, token]) {
+    assert.equal(diagnosticText.includes(sensitiveValue), false)
+  }
+})
+
+test('classifies recipient and action URL validation failures separately', () => {
+  const relay = createRelay()
+  const invalidRecipient = relay.payload({ recipient: 'not-an-email' })
+  const invalidActionUrl = relay.payload({ action_url: `https://attacker.example/verify-email?token=${token}` })
+
+  assert.equal(relay.post(invalidRecipient).status, 'invalid_recipient')
+  assert.equal(relay.post(invalidActionUrl).status, 'invalid_action_url')
+  assert.equal(relay.sent.length, 0)
+
+  const statuses = relay.diagnostics
+    .map((line) => JSON.parse(line.slice('DD_RELAY_STAGE '.length)))
+    .filter((record) => record.stage === 'response_returned')
+    .map((record) => record.status)
+  assert.deepEqual(statuses, ['invalid_recipient', 'invalid_action_url'])
+})
+
 test('rejects invalid signatures and stale timestamps', () => {
   const relay = createRelay()
   const invalid = relay.payload({ request_id: validId2, nonce: 'b'.repeat(32) })
@@ -200,7 +260,7 @@ test('rejects unsupported routes and enforces recipient and daily caps', () => {
     nonce: 'b'.repeat(32),
   })
   badLink.signature = createHmac('sha256', secret).update(relay.context.canonicalMessage_(badLink), 'utf8').digest('hex')
-  assert.equal(relay.post(badLink).status, 'invalid_request')
+  assert.equal(relay.post(badLink).status, 'invalid_action_url')
 
   const first = relay.payload({ recipient: 'one@example.net', nonce: 'c'.repeat(32) })
   assert.equal(relay.post(first).status, 'sent')
@@ -215,7 +275,7 @@ test('rejects unsupported routes and enforces recipient and daily caps', () => {
 
 test('rejects action base URLs containing credentials', () => {
   const relay = createRelay({ actionBase: 'https://user:password@dataset.example' })
-  assert.equal(relay.post(relay.payload()).status, 'invalid_request')
+  assert.equal(relay.post(relay.payload()).status, 'invalid_action_url')
   assert.equal(relay.sent.length, 0)
 })
 

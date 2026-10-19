@@ -14,7 +14,9 @@ var RELAY = {
 };
 
 var SAFE_RELAY_STATUSES = [
-  "sent", "duplicate_sent", "misconfigured", "expired", "invalid_request", "unauthorized",
+  "sent", "duplicate_sent", "misconfigured", "expired", "invalid_request",
+  "invalid_envelope", "body_too_large", "invalid_json", "invalid_payload",
+  "invalid_recipient", "invalid_action_url", "unauthorized",
   "busy", "cooldown", "daily_cap", "quota_exhausted", "relay_error", "delivery_unknown",
   "delivery_failed", "idempotency_conflict", "replay"
 ];
@@ -44,20 +46,20 @@ function doPost(event) {
   var startedAt = Date.now();
   logRelayStage_(startedAt, "request_received");
   if (!event || !event.postData || typeof event.postData.contents !== "string") {
-    return relayResponse_(startedAt, "request_rejected", "invalid_request");
+    return relayResponse_(startedAt, "envelope_rejected", "invalid_envelope");
   }
   var raw = event.postData.contents;
   if (Utilities.newBlob(raw).getBytes().length > RELAY.maxBodyBytes) {
-    return relayResponse_(startedAt, "request_rejected", "invalid_request");
+    return relayResponse_(startedAt, "body_size_rejected", "body_too_large");
   }
 
   var payload;
   try {
     payload = JSON.parse(raw);
   } catch (_error) {
-    return relayResponse_(startedAt, "request_rejected", "invalid_request");
+    return relayResponse_(startedAt, "json_rejected", "invalid_json");
   }
-  if (!validPayloadShape_(payload)) return relayResponse_(startedAt, "request_rejected", "invalid_request");
+  if (!validPayloadShape_(payload)) return relayResponse_(startedAt, "payload_rejected", "invalid_payload");
   logRelayStage_(startedAt, "payload_validated");
 
   var properties = PropertiesService.getScriptProperties();
@@ -80,8 +82,11 @@ function doPost(event) {
     return relayResponse_(startedAt, "timestamp_rejected", "expired");
   }
   logRelayStage_(startedAt, "timestamp_validated");
-  if (!validRecipient_(payload.recipient) || !validActionUrl_(payload.action_url, actionBase, payload.message_type)) {
-    return relayResponse_(startedAt, "recipient_or_action_rejected", "invalid_request");
+  if (!validRecipient_(payload.recipient)) {
+    return relayResponse_(startedAt, "recipient_rejected", "invalid_recipient");
+  }
+  if (!validActionUrl_(payload.action_url, actionBase, payload.message_type)) {
+    return relayResponse_(startedAt, "action_url_rejected", "invalid_action_url");
   }
   logRelayStage_(startedAt, "recipient_and_action_validated");
 
