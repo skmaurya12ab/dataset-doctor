@@ -10,19 +10,34 @@ const validId = '123e4567-e89b-42d3-a456-426614174000'
 const validId2 = '123e4567-e89b-42d3-a456-426614174001'
 const token = 'x'.repeat(43)
 
-function createRelay({ dailyCap = 2, remainingQuota = 10 } = {}) {
+function createRelay({
+  dailyCap = 2,
+  remainingQuota = 10,
+  actionBase = 'https://dataset.example',
+  timestampTolerance = 300,
+  failSentStatePersistence = false,
+} = {}) {
   let now = Date.UTC(2026, 9, 16, 12, 0, 0)
   let quota = remainingQuota
   const properties = new Map([
     ['HMAC_SECRET', secret],
-    ['ACTION_BASE_URL', 'https://dataset.example'],
+    ['ACTION_BASE_URL', actionBase],
+    ['TIMESTAMP_TOLERANCE_SECONDS', String(timestampTolerance)],
     ['DAILY_SEND_CAP', String(dailyCap)],
     ['RECIPIENT_COOLDOWN_SECONDS', '900'],
   ])
   const sent = []
+  const diagnostics = []
   const propertyApi = {
     getProperty(key) { return properties.has(key) ? properties.get(key) : null },
-    setProperty(key, value) { properties.set(key, String(value)); return this },
+    setProperty(key, value) {
+      const parsed = key.startsWith('request_') ? JSON.parse(String(value)) : null
+      if (failSentStatePersistence && parsed?.status === 'sent') {
+        throw new Error('private property failure detail')
+      }
+      properties.set(key, String(value))
+      return this
+    },
     deleteProperty(key) { properties.delete(key); return this },
     getProperties() { return Object.fromEntries(properties) },
   }
@@ -41,6 +56,7 @@ function createRelay({ dailyCap = 2, remainingQuota = 10 } = {}) {
     JSON,
     RegExp,
     isFinite,
+    console: { log(message) { diagnostics.push(String(message)) } },
     PropertiesService: { getScriptProperties: () => propertyApi },
     LockService: { getScriptLock: () => ({ tryLock: () => true, releaseLock: () => {} }) },
     MailApp: {
@@ -86,7 +102,16 @@ function createRelay({ dailyCap = 2, remainingQuota = 10 } = {}) {
   function post(body) {
     return JSON.parse(context.doPost({ postData: { contents: JSON.stringify(body) } }).getContent())
   }
-  return { context, payload, post, sent, properties, setNow(value) { now = value }, setQuota(value) { quota = value } }
+  return {
+    context,
+    payload,
+    post,
+    sent,
+    properties,
+    diagnostics,
+    setNow(value) { now = value },
+    setQuota(value) { quota = value },
+  }
 }
 
 test('accepts a signed fixed template and makes same request id idempotent', () => {
@@ -99,6 +124,41 @@ test('accepts a signed fixed template and makes same request id idempotent', () 
   assert.equal(relay.sent[0].from, undefined)
 })
 
+test('emits safe timing stages for a successful delivery path', () => {
+  const relay = createRelay()
+  const request = relay.payload()
+  assert.equal(relay.post(request).status, 'sent')
+
+  const records = relay.diagnostics.map((line) => {
+    assert.ok(line.startsWith('DD_RELAY_STAGE '))
+    return JSON.parse(line.slice('DD_RELAY_STAGE '.length))
+  })
+  assert.deepEqual(records.map((record) => record.stage), [
+    'request_received',
+    'payload_validated',
+    'configuration_validated',
+    'timestamp_validated',
+    'recipient_and_action_validated',
+    'signature_validated',
+    'lock_acquired',
+    'request_reserved',
+    'mail_send_started',
+    'mail_app_accepted',
+    'final_state_persisted',
+    'relay_completed',
+    'response_returned',
+  ])
+  for (const record of records) {
+    assert.ok(Number.isInteger(record.elapsed_ms) && record.elapsed_ms >= 0)
+    assert.ok(Object.keys(record).every((key) => ['stage', 'elapsed_ms', 'status'].includes(key)))
+  }
+  assert.equal(records.at(-1).status, 'sent')
+  const diagnosticText = relay.diagnostics.join('\n')
+  for (const sensitiveValue of [secret, request.recipient, request.action_url, request.signature, token]) {
+    assert.equal(diagnosticText.includes(sensitiveValue), false)
+  }
+})
+
 test('rejects invalid signatures and stale timestamps', () => {
   const relay = createRelay()
   const invalid = relay.payload({ request_id: validId2, nonce: 'b'.repeat(32) })
@@ -108,6 +168,12 @@ test('rejects invalid signatures and stale timestamps', () => {
   // Re-sign stale request so expiry, rather than HMAC, is the failed check.
   expired.signature = createHmac('sha256', secret).update(relay.context.canonicalMessage_(expired), 'utf8').digest('hex')
   assert.equal(relay.post(expired).status, 'expired')
+  assert.equal(relay.sent.length, 0)
+})
+
+test('returns a sanitized misconfigured status for invalid timestamp tolerance', () => {
+  const relay = createRelay({ timestampTolerance: 'invalid' })
+  assert.equal(relay.post(relay.payload()).status, 'misconfigured')
   assert.equal(relay.sent.length, 0)
 })
 
@@ -145,6 +211,21 @@ test('rejects unsupported routes and enforces recipient and daily caps', () => {
   const overCap = relay.payload({ request_id: '123e4567-e89b-42d3-a456-426614174002', recipient: 'three@example.net', nonce: 'f'.repeat(32) })
   assert.equal(relay.post(overCap).status, 'daily_cap')
   assert.equal(relay.sent.length, 2)
+})
+
+test('rejects action base URLs containing credentials', () => {
+  const relay = createRelay({ actionBase: 'https://user:password@dataset.example' })
+  assert.equal(relay.post(relay.payload()).status, 'invalid_request')
+  assert.equal(relay.sent.length, 0)
+})
+
+test('keeps sent requests uncertain when final state persistence fails', () => {
+  const relay = createRelay({ failSentStatePersistence: true })
+  const request = relay.payload()
+
+  assert.equal(relay.post(request).status, 'delivery_unknown')
+  assert.equal(relay.post(request).status, 'delivery_unknown')
+  assert.equal(relay.sent.length, 1)
 })
 
 test('fails closed when the account quota is exhausted', () => {

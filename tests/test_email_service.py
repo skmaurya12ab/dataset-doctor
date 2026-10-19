@@ -3,7 +3,9 @@
 import asyncio
 import hashlib
 import hmac
+import io
 import json
+from urllib.error import HTTPError, URLError
 from urllib.request import Request
 
 import pytest
@@ -88,6 +90,15 @@ def test_v1_canonical_representation_and_content_redirect_host_are_fixed() -> No
     assert handler.redirect_request(
         request, None, 302, "Found", {}, "https://attacker.example/collect"
     ) is None
+    assert handler.redirect_request(
+        request, None, 302, "Found", {}, "https://script.googleusercontent.com:443/macros/echo?key=one-time"
+    ) is not None
+    assert handler.redirect_request(
+        request, None, 302, "Found", {}, "https://script.googleusercontent.com:444/macros/echo?key=one-time"
+    ) is None
+    assert handler.redirect_request(
+        request, None, 307, "Temporary Redirect", {}, "https://script.googleusercontent.com/macros/echo?key=one-time"
+    ) is None
 
 
 def test_action_urls_match_existing_frontend_routes_and_encode_token() -> None:
@@ -125,7 +136,7 @@ def test_relay_post_accepts_confirmed_response_and_rejects_non_sent_status(monke
 
     monkeypatch.setattr(email_service, "open_relay_request", fake_urlopen)
     payload = service._create_payload("password_reset", "person@example.com", "C" * 43)
-    assert service._post(payload) is True
+    assert service._post(payload) == "sent"
     request = observed["request"]
     assert isinstance(request, Request)
     assert request.get_method() == "POST"
@@ -133,11 +144,168 @@ def test_relay_post_accepts_confirmed_response_and_rejects_non_sent_status(monke
     assert observed["timeout"] == 12.0
     assert observed["read_size"] == 8193
     observed["status"] = "quota_exhausted"
-    assert service._post(payload) is False
+    assert service._post(payload) == "quota_exhausted"
+
+
+@pytest.mark.parametrize(
+    ("response_body", "expected"),
+    [
+        (b'{"status":"duplicate_sent"}', "duplicate_sent"),
+        (b'{"status":"unauthorized"}', "unauthorized"),
+        (b'{"status":"status-from-untrusted-response"}', "unexpected_status"),
+        (b'{"unexpected":"shape"}', "unexpected_status"),
+        (b'not-json', "non_json_response"),
+        (b'{"status":"sent"}' + b" " * 8190, "response_too_large"),
+    ],
+)
+def test_relay_post_classifies_responses_without_preserving_unknown_status(
+    monkeypatch, response_body: bytes, expected: str
+) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+    payload = service._create_payload("verification", "person@example.com", "J" * 43)
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size):
+            return response_body
+
+    monkeypatch.setattr(email_service, "open_relay_request", lambda *_args, **_kwargs: Response())
+
+    assert service._post(payload) == expected
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "expected"),
+    [
+        (lambda: HTTPError("https://relay.example/exec", 503, "private failure", {}, io.BytesIO(b"private body")), "http_error"),
+        (lambda: URLError("private URL detail"), "url_error"),
+        (lambda: URLError(TimeoutError("private timeout detail")), "timeout"),
+        (lambda: TimeoutError("private timeout detail"), "timeout"),
+        (lambda: OSError("private transport detail"), "transport_error"),
+    ],
+)
+def test_relay_post_classifies_transport_errors_without_logging_details(
+    monkeypatch, error_factory, expected: str
+) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+    payload = service._create_payload("verification", "person@example.com", "K" * 43)
+
+    def fail_request(*_args, **_kwargs):
+        raise error_factory()
+
+    monkeypatch.setattr(email_service, "open_relay_request", fail_request)
+
+    assert service._post(payload) == expected
 
 
 @pytest.mark.asyncio
-async def test_relay_timeout_is_failure_and_is_not_retried(monkeypatch) -> None:
+async def test_relay_logs_only_whitelisted_status_and_never_response_fields(monkeypatch, caplog) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+    sensitive_values = [
+        "relay-private-recipient@example.invalid",
+        "https://dataset.example/verify-email?token=relay-private-token",
+        "relay-private-signature",
+        "relay-private-response-body",
+    ]
+    body = json.dumps(
+        {
+            "status": "unauthorized",
+            "recipient": sensitive_values[0],
+            "action_url": sensitive_values[1],
+            "signature": sensitive_values[2],
+            "message": sensitive_values[3],
+        }
+    ).encode()
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size):
+            return body
+
+    async def direct_call(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(email_service, "open_relay_request", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(email_service.asyncio, "to_thread", direct_call)
+
+    assert await service.send_verification_email("person@example.com", "L" * 43) is False
+    assert "status=unauthorized" in caplog.text
+    for value in sensitive_values:
+        assert value not in caplog.text
+    assert body.decode() not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response_body", "expected_outcome", "private_text"),
+    [
+        (b'{"status":"provider-secret-status"}', "unexpected_status", "provider-secret-status"),
+        (b"private non-json recipient body", "non_json_response", "private non-json recipient body"),
+    ],
+)
+async def test_relay_normalizes_unknown_and_non_json_response_logs(
+    monkeypatch, caplog, response_body: bytes, expected_outcome: str, private_text: str
+) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size):
+            return response_body
+
+    async def direct_call(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(email_service, "open_relay_request", lambda *_args, **_kwargs: Response())
+    monkeypatch.setattr(email_service.asyncio, "to_thread", direct_call)
+
+    assert await service.send_verification_email("person@example.com", "N" * 43) is False
+    assert f"status={expected_outcome}" in caplog.text
+    assert private_text not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("relay_status", "expected"),
+    [("sent", True), ("duplicate_sent", True), ("delivery_unknown", False), ("unexpected_status", False)],
+)
+async def test_relay_reports_success_only_for_confirmed_sent_statuses(
+    monkeypatch, relay_status: str, expected: bool
+) -> None:
+    service = AppsScriptEmailService(apps_script_settings())
+
+    async def direct_call(function, *args):
+        return function(*args)
+
+    monkeypatch.setattr(service, "_post", lambda _payload: relay_status)
+    monkeypatch.setattr(email_service.asyncio, "to_thread", direct_call)
+
+    assert await service.send_verification_email("person@example.com", "M" * 43) is expected
+
+
+@pytest.mark.asyncio
+async def test_relay_timeout_is_failure_and_is_not_retried(monkeypatch, caplog) -> None:
     service = AppsScriptEmailService(apps_script_settings())
     calls = 0
 
@@ -153,6 +321,8 @@ async def test_relay_timeout_is_failure_and_is_not_retried(monkeypatch) -> None:
     monkeypatch.setattr(email_service.asyncio, "to_thread", direct_call)
     assert await service.send_verification_email("person@example.com", "D" * 43) is False
     assert calls == 1
+    assert "status=timeout" in caplog.text
+    assert "sensitive URL/token must not be logged" not in caplog.text
 
 
 @pytest.mark.asyncio

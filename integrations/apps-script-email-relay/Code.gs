@@ -13,43 +13,84 @@ var RELAY = {
   defaultIdempotencyTtlSeconds: 86400
 };
 
+var SAFE_RELAY_STATUSES = [
+  "sent", "duplicate_sent", "misconfigured", "expired", "invalid_request", "unauthorized",
+  "busy", "cooldown", "daily_cap", "quota_exhausted", "relay_error", "delivery_unknown",
+  "delivery_failed", "idempotency_conflict", "replay"
+];
+
+function logRelayStage_(startedAt, stage, status) {
+  var record = {
+    stage: stage,
+    elapsed_ms: Math.max(0, Date.now() - startedAt)
+  };
+  if (status) {
+    record.status = SAFE_RELAY_STATUSES.indexOf(status) >= 0 ? status : "relay_error";
+  }
+  try {
+    console.log("DD_RELAY_STAGE " + JSON.stringify(record));
+  } catch (_error) {
+    // Diagnostics must never prevent a relay response or email send.
+  }
+}
+
+function relayResponse_(startedAt, stage, status) {
+  logRelayStage_(startedAt, stage);
+  logRelayStage_(startedAt, "response_returned", status);
+  return output_({ status: status });
+}
+
 function doPost(event) {
+  var startedAt = Date.now();
+  logRelayStage_(startedAt, "request_received");
   if (!event || !event.postData || typeof event.postData.contents !== "string") {
-    return output_({ status: "invalid_request" });
+    return relayResponse_(startedAt, "request_rejected", "invalid_request");
   }
   var raw = event.postData.contents;
   if (Utilities.newBlob(raw).getBytes().length > RELAY.maxBodyBytes) {
-    return output_({ status: "invalid_request" });
+    return relayResponse_(startedAt, "request_rejected", "invalid_request");
   }
 
   var payload;
   try {
     payload = JSON.parse(raw);
   } catch (_error) {
-    return output_({ status: "invalid_request" });
+    return relayResponse_(startedAt, "request_rejected", "invalid_request");
   }
-  if (!validPayloadShape_(payload)) return output_({ status: "invalid_request" });
+  if (!validPayloadShape_(payload)) return relayResponse_(startedAt, "request_rejected", "invalid_request");
+  logRelayStage_(startedAt, "payload_validated");
 
   var properties = PropertiesService.getScriptProperties();
   var secret = properties.getProperty("HMAC_SECRET");
   var actionBase = properties.getProperty("ACTION_BASE_URL");
-  if (!secret || secret.length < 32 || !actionBase) return output_({ status: "misconfigured" });
+  if (!secret || secret.length < 32 || !actionBase) {
+    return relayResponse_(startedAt, "configuration_rejected", "misconfigured");
+  }
+  logRelayStage_(startedAt, "configuration_validated");
 
   var now = Date.now();
-  var timestampWindow = boundedIntegerProperty_(properties, "TIMESTAMP_TOLERANCE_SECONDS", 1, 600,
-    RELAY.defaultTimestampWindowSeconds);
+  var timestampWindow;
+  try {
+    timestampWindow = boundedIntegerProperty_(properties, "TIMESTAMP_TOLERANCE_SECONDS", 1, 600,
+      RELAY.defaultTimestampWindowSeconds);
+  } catch (_error) {
+    return relayResponse_(startedAt, "configuration_rejected", "misconfigured");
+  }
   if (Math.abs(Math.floor(now / 1000) - payload.timestamp) > timestampWindow) {
-    return output_({ status: "expired" });
+    return relayResponse_(startedAt, "timestamp_rejected", "expired");
   }
+  logRelayStage_(startedAt, "timestamp_validated");
   if (!validRecipient_(payload.recipient) || !validActionUrl_(payload.action_url, actionBase, payload.message_type)) {
-    return output_({ status: "invalid_request" });
+    return relayResponse_(startedAt, "recipient_or_action_rejected", "invalid_request");
   }
+  logRelayStage_(startedAt, "recipient_and_action_validated");
 
   var canonical = canonicalMessage_(payload);
   var expectedSignature = hmacHex_(canonical, secret);
   if (!constantTimeEqual_(expectedSignature, payload.signature)) {
-    return output_({ status: "unauthorized" });
+    return relayResponse_(startedAt, "signature_rejected", "unauthorized");
   }
+  logRelayStage_(startedAt, "signature_validated");
 
   var requestHash = sha256Hex_([
     payload.request_id,
@@ -58,7 +99,8 @@ function doPost(event) {
     payload.action_url
   ].join("\n"));
   var lock = LockService.getScriptLock();
-  if (!lock.tryLock(5000)) return output_({ status: "busy" });
+  if (!lock.tryLock(5000)) return relayResponse_(startedAt, "lock_busy", "busy");
+  logRelayStage_(startedAt, "lock_acquired");
 
   var requestKey = "request_" + payload.request_id;
   var reserved;
@@ -66,34 +108,45 @@ function doPost(event) {
     cleanupExpiredRecords_(properties, now);
     var existing = parseRecord_(properties.getProperty(requestKey));
     if (existing) {
-      if (existing.hash !== requestHash) return output_({ status: "idempotency_conflict" });
-      if (existing.status === "sent") return output_({ status: "duplicate_sent" });
+      if (existing.hash !== requestHash) {
+        return relayResponse_(startedAt, "idempotency_conflict", "idempotency_conflict");
+      }
+      if (existing.status === "sent") {
+        return relayResponse_(startedAt, "duplicate_request", "duplicate_sent");
+      }
       // A reserved/failed call is never resent automatically: sendEmail may have
       // succeeded immediately before an execution or response failure.
-      return output_({ status: existing.status === "processing" ? "delivery_unknown" : "delivery_failed" });
+      var existingStatus = existing.status === "processing" || existing.status === "delivery_unknown"
+        ? "delivery_unknown"
+        : "delivery_failed";
+      return relayResponse_(startedAt, "duplicate_non_success", existingStatus);
     }
 
     var nonceKey = "nonce_" + payload.nonce;
-    if (properties.getProperty(nonceKey)) return output_({ status: "replay" });
+    if (properties.getProperty(nonceKey)) return relayResponse_(startedAt, "nonce_replay", "replay");
 
     var dailyCap = boundedIntegerProperty_(properties, "DAILY_SEND_CAP", 1, RELAY.maxDailyCap,
       RELAY.defaultDailyCap);
     var cooldownSeconds = boundedIntegerProperty_(properties, "RECIPIENT_COOLDOWN_SECONDS", 60, 86400,
       RELAY.defaultCooldownSeconds);
-    if (MailApp.getRemainingDailyQuota() < 1) return output_({ status: "quota_exhausted" });
+    if (MailApp.getRemainingDailyQuota() < 1) {
+      return relayResponse_(startedAt, "mail_quota_exhausted", "quota_exhausted");
+    }
 
     var recipientKey = "recipient_" + hmacHex_(
       "recipient\n" + payload.message_type + "\n" + payload.recipient.toLowerCase(), secret
     );
     var recipientRecord = parseRecord_(properties.getProperty(recipientKey));
     if (recipientRecord && Number(recipientRecord.cooldown_until_ms) > now) {
-      return output_({ status: "cooldown" });
+      return relayResponse_(startedAt, "recipient_cooldown", "cooldown");
     }
 
     var utcDate = new Date(now).toISOString().slice(0, 10);
     var dailyKey = "daily_" + utcDate;
     var dailyRecord = parseRecord_(properties.getProperty(dailyKey)) || { attempt_count: 0 };
-    if (Number(dailyRecord.attempt_count) >= dailyCap) return output_({ status: "daily_cap" });
+    if (Number(dailyRecord.attempt_count) >= dailyCap) {
+      return relayResponse_(startedAt, "project_daily_cap", "daily_cap");
+    }
 
     var nonceTtl = boundedIntegerProperty_(properties, "NONCE_TTL_SECONDS", 300, 3600,
       RELAY.defaultNonceTtlSeconds);
@@ -117,12 +170,14 @@ function doPost(event) {
     properties.setProperty(reserved.nonceKey, JSON.stringify(reserved.nonceRecord));
     properties.setProperty(reserved.recipientKey, JSON.stringify(reserved.recipientRecord));
     properties.setProperty(reserved.dailyKey, JSON.stringify(reserved.dailyRecord));
+    logRelayStage_(startedAt, "request_reserved");
   } catch (_error) {
-    return output_({ status: "relay_error" });
+    return relayResponse_(startedAt, "reservation_failed", "relay_error");
   } finally {
     lock.releaseLock();
   }
 
+  logRelayStage_(startedAt, "mail_send_started");
   try {
     var message = fixedMessage_(payload.message_type, payload.action_url);
     MailApp.sendEmail({
@@ -131,19 +186,31 @@ function doPost(event) {
       body: message.body,
       name: "Dataset Doctor"
     });
-    reserved.requestRecord.status = "sent";
-    properties.setProperty(reserved.requestKey, JSON.stringify(reserved.requestRecord));
-    return output_({ status: "sent" });
+    logRelayStage_(startedAt, "mail_app_accepted");
   } catch (_error) {
     // Do not return or log exception text: it may include recipient data.
     try {
       reserved.requestRecord.status = "failed";
       properties.setProperty(reserved.requestKey, JSON.stringify(reserved.requestRecord));
+      logRelayStage_(startedAt, "failure_state_persisted");
     } catch (_recordError) {
       // A missing final record leaves "processing" and therefore still fails closed.
+      logRelayStage_(startedAt, "failure_state_persistence_failed");
+      return relayResponse_(startedAt, "delivery_state_uncertain", "delivery_unknown");
     }
-    return output_({ status: "delivery_failed" });
+    return relayResponse_(startedAt, "mail_send_failed", "delivery_failed");
   }
+
+  try {
+    reserved.requestRecord.status = "sent";
+    properties.setProperty(reserved.requestKey, JSON.stringify(reserved.requestRecord));
+  } catch (_stateError) {
+    // MailApp accepted the message, but processing remains the durable state.
+    // Keep this request id non-retryable and do not claim a persisted success.
+    return relayResponse_(startedAt, "final_state_persistence_failed", "delivery_unknown");
+  }
+  logRelayStage_(startedAt, "final_state_persisted");
+  return relayResponse_(startedAt, "relay_completed", "sent");
 }
 
 function validPayloadShape_(payload) {
@@ -185,7 +252,8 @@ function validActionUrl_(actionUrl, configuredBase, messageType) {
     var tokenValues = link.searchParams.getAll("token");
     var queryKeys = [];
     link.searchParams.forEach(function (_value, key) { queryKeys.push(key); });
-    return base.protocol === "https:" && (base.pathname === "/" || base.pathname === "") &&
+    return base.protocol === "https:" && base.username === "" && base.password === "" &&
+      (base.pathname === "/" || base.pathname === "") &&
       base.search === "" && base.hash === "" && link.protocol === "https:" && link.origin === base.origin && link.pathname === expectedPath &&
       link.username === "" && link.password === "" && link.hash === "" &&
       tokenValues.length === 1 && queryKeys.length === 1 &&

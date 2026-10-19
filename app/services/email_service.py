@@ -8,6 +8,7 @@ import json
 from email.message import EmailMessage
 import re
 import smtplib
+import socket
 import time
 from typing import Any, Dict, List, Optional
 from urllib.error import HTTPError, URLError
@@ -21,16 +22,53 @@ from app.core.security import validate_email_format
 
 logger = get_logger(__name__)
 
+APPS_SCRIPT_RESPONSE_STATUSES = frozenset(
+    {
+        "sent",
+        "duplicate_sent",
+        "misconfigured",
+        "expired",
+        "invalid_request",
+        "unauthorized",
+        "busy",
+        "cooldown",
+        "daily_cap",
+        "quota_exhausted",
+        "relay_error",
+        "delivery_unknown",
+        "delivery_failed",
+        "idempotency_conflict",
+        "replay",
+    }
+)
+APPS_SCRIPT_SUCCESS_STATUSES = frozenset({"sent", "duplicate_sent"})
+APPS_SCRIPT_CLIENT_OUTCOMES = frozenset(
+    {
+        "timeout",
+        "http_error",
+        "url_error",
+        "transport_error",
+        "non_json_response",
+        "unexpected_status",
+        "response_too_large",
+    }
+)
+
 
 class ContentServiceRedirectHandler(HTTPRedirectHandler):
     """Follow only Apps Script ContentService's documented HTTPS response host."""
 
     def redirect_request(self, request, fp, code, message, headers, new_url):
-        destination = urlsplit(new_url)
+        try:
+            destination = urlsplit(new_url)
+            port = destination.port
+        except ValueError:
+            return None
         if (
             code not in {301, 302, 303}
             or destination.scheme != "https"
             or destination.hostname != "script.googleusercontent.com"
+            or port not in {None, 443}
             or destination.username
             or destination.password
         ):
@@ -217,16 +255,24 @@ class AppsScriptEmailService(BaseEmailService):
     async def _send(self, message_type: str, to_email: str, token: str) -> bool:
         try:
             payload = self._create_payload(message_type, to_email, token)
-            ok = await asyncio.wait_for(
+            outcome = await asyncio.wait_for(
                 asyncio.to_thread(self._post, payload),
                 timeout=self.timeout,
             )
-        except Exception as exc:
-            logger.warning("Apps Script email relay request failed (%s)", type(exc).__name__)
-            return False
-        if not ok:
-            logger.warning("Apps Script email relay did not confirm delivery (%s)", message_type)
-        return ok
+        except TimeoutError:
+            outcome = "timeout"
+        except Exception:
+            outcome = "relay_error"
+
+        if not isinstance(outcome, str) or outcome not in (
+            APPS_SCRIPT_RESPONSE_STATUSES | APPS_SCRIPT_CLIENT_OUTCOMES
+        ):
+            outcome = "unexpected_status"
+        if outcome in APPS_SCRIPT_SUCCESS_STATUSES:
+            logger.info("Apps Script relay delivery status=%s", outcome)
+            return True
+        logger.warning("Apps Script relay delivery status=%s", outcome)
+        return False
 
     def _create_payload(self, message_type: str, to_email: str, token: str) -> Dict[str, Any]:
         if message_type not in {"verification", "password_reset"}:
@@ -261,10 +307,10 @@ class AppsScriptEmailService(BaseEmailService):
             "signature": signature,
         }
 
-    def _post(self, payload: Dict[str, Any]) -> bool:
+    def _post(self, payload: Dict[str, Any]) -> str:
         body = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         if len(body) > 8192:
-            return False
+            return "invalid_request"
         request = Request(
             self.endpoint,
             data=body,
@@ -274,18 +320,32 @@ class AppsScriptEmailService(BaseEmailService):
         try:
             # urllib follows the documented ContentService one-time googleusercontent redirect.
             with open_relay_request(request, timeout=self.timeout) as response:
-                if not 200 <= response.status < 300:
-                    return False
+                status_code = getattr(response, "status", None)
+                if not isinstance(status_code, int) or not 200 <= status_code < 300:
+                    return "http_error"
                 response_bytes = response.read(8193)
-        except (HTTPError, URLError, TimeoutError, OSError):
-            return False
+        except HTTPError:
+            return "http_error"
+        except (TimeoutError, socket.timeout):
+            return "timeout"
+        except URLError as exc:
+            if isinstance(exc.reason, (TimeoutError, socket.timeout)):
+                return "timeout"
+            return "url_error"
+        except OSError:
+            return "transport_error"
         if len(response_bytes) > 8192:
-            return False
+            return "response_too_large"
         try:
             result = json.loads(response_bytes.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
-            return False
-        return isinstance(result, dict) and result.get("status") in {"sent", "duplicate_sent"}
+            return "non_json_response"
+        if not isinstance(result, dict):
+            return "unexpected_status"
+        relay_status = result.get("status")
+        if not isinstance(relay_status, str) or relay_status not in APPS_SCRIPT_RESPONSE_STATUSES:
+            return "unexpected_status"
+        return relay_status
 
 
 _global_email_service: Optional[BaseEmailService] = None
