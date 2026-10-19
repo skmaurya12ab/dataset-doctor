@@ -21,6 +21,8 @@ def test_vercel_preserves_api_proxy_and_clean_url_spa_fallback() -> None:
         assert rewrites[-1]["destination"] == "/"
 
     dockerfile = (config_path.parents[1] / "Dockerfile").read_text()
+    assert "ca-certificates \\" in dockerfile
+    assert "update-ca-certificates" in dockerfile
     port_expr = "$" + "{PORT:-8000}"
     assert "--port " + port_expr in dockerfile
     assert "EXPOSE 8000" in dockerfile

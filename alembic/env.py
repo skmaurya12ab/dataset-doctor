@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 from app.core.config import get_settings
+from app.core.database import build_alembic_engine_configuration
 from app.models import Base
 
 # Alembic Config object, which provides access to values within alembic.ini
@@ -54,11 +55,16 @@ async def run_async_migrations() -> None:
     """Run migrations in 'online' mode using an async engine."""
     settings = get_settings()
     configuration = config.get_section(config.config_ini_section, {})
-    configuration["sqlalchemy.url"] = os.environ.get("DATABASE_URL") or settings.database_url
+    database_url = os.environ.get("DATABASE_URL") or settings.database_url
+    migration_configuration, connect_args = build_alembic_engine_configuration(
+        settings, database_url
+    )
+    configuration.update(migration_configuration)
 
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
+        connect_args=connect_args,
         poolclass=pool.NullPool,
     )
 

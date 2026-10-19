@@ -15,7 +15,9 @@ WORKDIR /app
 
 # Install system dependencies (curl for healthcheck, build-essential if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     curl \
+    && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Install uv for fast package installation

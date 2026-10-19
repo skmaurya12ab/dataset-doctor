@@ -1,9 +1,14 @@
 """Tests for application settings and configuration validation."""
 
+import ssl
+
 import pytest
 from pydantic import ValidationError
 from app.core.config import Settings
-from app.core.database import build_engine_configuration
+from app.core.database import (
+    build_alembic_engine_configuration,
+    build_engine_configuration,
+)
 
 
 def test_default_settings_instantiation() -> None:
@@ -112,7 +117,43 @@ def test_production_database_requires_async_postgresql() -> None:
     valid.validate_database_configuration()
     engine_url, engine_kwargs = build_engine_configuration(valid)
     assert "sslmode" not in engine_url.query
-    assert engine_kwargs["connect_args"] == {"ssl": "verify-full"}
+    ssl_context = engine_kwargs["connect_args"]["ssl"]
+    assert isinstance(ssl_context, ssl.SSLContext)
+    assert ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert ssl_context.check_hostname is True
+
+
+def test_production_alembic_configuration_uses_verified_system_tls() -> None:
+    settings = Settings(
+        environment="production",
+        database_url="postgresql+asyncpg://user:password@db.example/test?sslmode=require",
+        _env_file=None,
+    )
+
+    migration_config, connect_args = build_alembic_engine_configuration(
+        settings, settings.database_url
+    )
+
+    assert "sslmode" not in migration_config["sqlalchemy.url"]
+    ssl_context = connect_args["ssl"]
+    assert isinstance(ssl_context, ssl.SSLContext)
+    assert ssl_context.verify_mode == ssl.CERT_REQUIRED
+    assert ssl_context.check_hostname is True
+
+
+def test_local_alembic_configuration_does_not_enable_tls() -> None:
+    settings = Settings(
+        environment="development",
+        database_url="sqlite+aiosqlite:///:memory:",
+        _env_file=None,
+    )
+
+    migration_config, connect_args = build_alembic_engine_configuration(
+        settings, settings.database_url
+    )
+
+    assert migration_config["sqlalchemy.url"] == settings.database_url
+    assert connect_args == {}
 
 
 def test_trusted_proxy_config_accepts_cidr_and_rejects_invalid_or_all_addresses() -> None:

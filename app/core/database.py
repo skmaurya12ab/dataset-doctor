@@ -9,6 +9,7 @@ sessions or use thread-isolated execution patterns.
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+import ssl
 from typing import Optional
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
@@ -28,9 +29,47 @@ _engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
 
 
+def build_database_connection_configuration(
+    settings, database_url: str | None = None
+) -> tuple[object, dict]:
+    """Build the database URL and driver options shared by app and migrations."""
+    configured_url = database_url or settings.database_url
+    engine_url: object = configured_url
+    connect_args: dict = {}
+
+    if settings.is_production:
+        settings.validate_database_configuration(configured_url)
+        parsed_url = make_url(configured_url)
+        query = dict(parsed_url.query)
+        # Avoid asyncpg's verify-full shorthand, which can rely on a per-user
+        # ~/.postgresql/root.crt rather than Python's system trust store.
+        query.pop("sslmode", None)
+        query.pop("ssl", None)
+        engine_url = parsed_url.set(query=query)
+        connect_args["ssl"] = build_postgresql_ssl_context()
+
+    return engine_url, connect_args
+
+
+def build_postgresql_ssl_context() -> ssl.SSLContext:
+    """Create hostname-verified TLS using Python's system trusted CA bundle."""
+    context = ssl.create_default_context(purpose=ssl.Purpose.SERVER_AUTH)
+    context.verify_mode = ssl.CERT_REQUIRED
+    context.check_hostname = True
+    return context
+
+
+def build_alembic_engine_configuration(
+    settings, database_url: str
+) -> tuple[dict[str, str], dict]:
+    """Return Alembic's URL and connect args using application DB policy."""
+    engine_url, connect_args = build_database_connection_configuration(settings, database_url)
+    return {"sqlalchemy.url": str(engine_url)}, connect_args
+
+
 def build_engine_configuration(settings) -> tuple[object, dict]:
     """Build SQLAlchemy options, enforcing verified TLS for production PostgreSQL."""
-    engine_url: object = settings.database_url
+    engine_url, connect_args = build_database_connection_configuration(settings)
     is_sqlite = "sqlite" in settings.database_url.lower()
     engine_kwargs: dict = {
         "echo": settings.debug,
@@ -47,16 +86,8 @@ def build_engine_configuration(settings) -> tuple[object, dict]:
             }
         )
 
-    if settings.is_production:
-        settings.validate_database_configuration()
-        parsed_url = make_url(settings.database_url)
-        query = dict(parsed_url.query)
-        # asyncpg accepts sslmode in its own DSN, but SQLAlchemy forwards URL
-        # query keys as keyword arguments. Remove it and enforce hostname-verified TLS.
-        query.pop("sslmode", None)
-        query.pop("ssl", None)
-        engine_url = parsed_url.set(query=query)
-        engine_kwargs["connect_args"] = {"ssl": "verify-full"}
+    if connect_args:
+        engine_kwargs["connect_args"] = connect_args
 
     return engine_url, engine_kwargs
 

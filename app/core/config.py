@@ -344,7 +344,7 @@ class Settings(BaseSettings):
             normalized.append(str(network))
         return normalized
 
-    def validate_database_configuration(self) -> None:
+    def validate_database_configuration(self, database_url: str | None = None) -> None:
         """Require the production database to use the supported async PostgreSQL driver."""
         if not self.is_production:
             return
@@ -352,15 +352,15 @@ class Settings(BaseSettings):
         from urllib.parse import urlsplit
 
         try:
-            database_url = urlsplit(self.database_url)
+            parsed_database_url = urlsplit(database_url or self.database_url)
         except ValueError as exc:
             raise ValueError(
                 "Production configuration error: DATABASE_URL must be a valid postgresql+asyncpg URL."
             ) from exc
         if (
-            database_url.scheme != "postgresql+asyncpg"
-            or not database_url.hostname
-            or not database_url.path.strip("/")
+            parsed_database_url.scheme != "postgresql+asyncpg"
+            or not parsed_database_url.hostname
+            or not parsed_database_url.path.strip("/")
         ):
             raise ValueError(
                 "Production configuration error: DATABASE_URL must use postgresql+asyncpg and include a database host and name."
