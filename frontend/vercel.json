@@ -4,7 +4,7 @@
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://REPLACE_WITH_RENDER_SERVICE.onrender.com/api/:path*"
+      "destination": "https://dataset-doctor-api-5ifz.onrender.com/api/:path*"
     },
     {
       "source": "/(.*)",

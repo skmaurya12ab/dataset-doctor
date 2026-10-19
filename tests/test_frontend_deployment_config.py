@@ -11,7 +11,7 @@ def test_vercel_preserves_api_proxy_and_clean_url_spa_fallback() -> None:
     rewrites = config["rewrites"]
     assert rewrites[0]["source"] == "/api/:path*"
     assert rewrites[0]["destination"] == (
-        "https://REPLACE_WITH_RENDER_SERVICE.onrender.com/api/:path*"
+        "https://dataset-doctor-api-5ifz.onrender.com/api/:path*"
     )
     assert rewrites[1] == {"source": "/(.*)", "destination": "/"}
 
