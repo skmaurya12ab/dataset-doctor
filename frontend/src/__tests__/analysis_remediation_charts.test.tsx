@@ -116,6 +116,20 @@ describe('PlotlyChart Integration', () => {
     )
   })
 
+  it('uses a grayscale palette for chart series without explicit colors', () => {
+    render(<PlotlyChart data={[]} />)
+
+    const chartEl = screen.getByTestId('plotly-mock')
+    const layout = JSON.parse(chartEl.getAttribute('data-plot-layout') || '{}')
+    expect(layout.colorway).toEqual([
+      '#f5f5f5',
+      '#d4d4d4',
+      '#a3a3a3',
+      '#737373',
+      '#525252',
+    ])
+  })
+
   it('handles empty chart data gracefully without throwing', () => {
     render(<PlotlyChart data={[]} />)
     const chartEl = screen.getByTestId('plotly-mock')

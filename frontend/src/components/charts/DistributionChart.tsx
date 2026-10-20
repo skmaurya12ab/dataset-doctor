@@ -32,8 +32,8 @@ export const DistributionChart: React.FC<DistributionChartProps> = ({
       boxmean: true as const,
       lowerfence: [current.min],
       upperfence: [current.max],
-      marker: { color: '#3b82f6' },
-      line: { color: '#38bdf8', width: 2 },
+      marker: { color: '#d4d4d4' },
+      line: { color: '#a3a3a3', width: 2 },
     },
   ]
 
@@ -117,7 +117,7 @@ export const DistributionChart: React.FC<DistributionChartProps> = ({
           layout={{
             margin: { l: 60, r: 30, t: 15, b: 35 },
             yaxis: {
-              title: { text: current.column, font: { size: 11, color: '#949ca9' } },
+              title: { text: current.column, font: { size: 11, color: '#a3a3a3' } },
             },
           }}
         />

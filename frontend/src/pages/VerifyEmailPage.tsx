@@ -64,37 +64,37 @@ export const VerifyEmailPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 text-slate-100">
+    <div className="min-h-screen bg-neutral-950 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 text-neutral-100">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8">
-        <div className="inline-flex items-center justify-center p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 mb-4 shadow-lg shadow-indigo-500/5">
-          <Activity className="h-10 w-10 text-indigo-400" />
+        <div className="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl border border-white/10 mb-4 shadow-lg shadow-black/20">
+          <Activity className="h-10 w-10 text-neutral-300" />
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-neutral-200 to-neutral-400 bg-clip-text text-transparent">
           Dataset Doctor
         </h1>
-        <p className="mt-2 text-sm text-slate-400">Email Address Verification</p>
+        <p className="mt-2 text-sm text-neutral-400">Email Address Verification</p>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-900/90 border border-slate-800 shadow-2xl rounded-2xl p-8 backdrop-blur-xl">
+        <div className="bg-neutral-900/90 border border-neutral-800 shadow-2xl rounded-2xl p-8 backdrop-blur-xl">
           {status === 'loading' && (
             <div className="text-center py-6 space-y-4">
-              <div className="w-10 h-10 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto" />
-              <p className="text-sm text-slate-300">Verifying your token with Dataset Doctor...</p>
+              <div className="w-10 h-10 border-4 border-neutral-400 border-t-transparent rounded-full animate-spin mx-auto" />
+              <p className="text-sm text-neutral-300">Verifying your token with Dataset Doctor...</p>
             </div>
           )}
 
           {status === 'success' && (
             <div className="text-center py-4 space-y-4">
-              <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center border border-emerald-500/20">
+              <div className="mx-auto w-12 h-12 bg-green-300/10 text-green-300 rounded-full flex items-center justify-center border border-green-300/20">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
               <h2 className="text-xl font-bold text-white">Email Verified!</h2>
-              <p className="text-sm text-slate-300 leading-relaxed">{message}</p>
+              <p className="text-sm text-neutral-300 leading-relaxed">{message}</p>
               <div className="pt-4">
                 <Link
                   to="/login"
-                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all text-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 bg-white hover:bg-neutral-200 text-neutral-950 font-medium rounded-xl transition-all text-sm"
                 >
                   <span>Sign In</span>
                   <ArrowRight className="h-4 w-4" />
@@ -107,12 +107,12 @@ export const VerifyEmailPage: React.FC = () => {
             <div className="space-y-4">
               <div
                 role="alert"
-                className="p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-start gap-3 text-rose-300 text-sm"
+                className="p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 text-red-300 text-sm"
               >
-                <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-rose-400" />
+                <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-red-400" />
                 <span>{message}</span>
               </div>
-              <p className="text-xs text-slate-400 text-center">
+              <p className="text-xs text-neutral-400 text-center">
                 Enter a token manually below or request a new verification email.
               </p>
             </div>
@@ -121,11 +121,11 @@ export const VerifyEmailPage: React.FC = () => {
           {(status === 'idle' || status === 'error') && (
             <form onSubmit={handleSubmit} className="mt-4 space-y-4">
               <div>
-                <label htmlFor="token" className="block text-sm font-medium text-slate-300 mb-1.5">
+                <label htmlFor="token" className="block text-sm font-medium text-neutral-300 mb-1.5">
                   Verification Token
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-500">
                     <KeyRound className="h-4 w-4" />
                   </div>
                   <input
@@ -135,14 +135,14 @@ export const VerifyEmailPage: React.FC = () => {
                     value={token}
                     onChange={(e) => setToken(e.target.value)}
                     placeholder="Enter verification token from email"
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                    className="w-full pl-10 pr-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all text-sm flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 bg-white hover:bg-neutral-200 text-neutral-950 font-medium rounded-xl transition-all text-sm flex items-center justify-center gap-2"
               >
                 <span>Verify Token</span>
                 <ArrowRight className="h-4 w-4" />
@@ -151,10 +151,10 @@ export const VerifyEmailPage: React.FC = () => {
           )}
 
           {status !== 'success' && (
-            <form onSubmit={handleResend} className="mt-6 border-t border-slate-800 pt-5 space-y-3">
-              <h2 className="text-sm font-semibold text-slate-200">Need a new verification email?</h2>
+            <form onSubmit={handleResend} className="mt-6 border-t border-neutral-800 pt-5 space-y-3">
+              <h2 className="text-sm font-semibold text-neutral-200">Need a new verification email?</h2>
               <div>
-                <label htmlFor="resend-email" className="block text-sm font-medium text-slate-300 mb-1.5">
+                <label htmlFor="resend-email" className="block text-sm font-medium text-neutral-300 mb-1.5">
                   Account Email
                 </label>
                 <input
@@ -165,24 +165,24 @@ export const VerifyEmailPage: React.FC = () => {
                   value={resendEmail}
                   onChange={(e) => setResendEmail(e.target.value)}
                   placeholder="you@example.com"
-                  className="w-full px-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                  className="w-full px-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
                 />
               </div>
               <button
                 type="submit"
                 disabled={isResending}
-                className="w-full py-2.5 px-4 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                className="w-full py-2.5 px-4 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 font-medium rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {isResending ? 'Requesting…' : 'Resend Verification Email'}
               </button>
               {resendMessage && (
-                <p role="status" className="text-xs text-slate-300 text-center">{resendMessage}</p>
+                <p role="status" className="text-xs text-neutral-300 text-center">{resendMessage}</p>
               )}
             </form>
           )}
 
-          <div className="mt-6 pt-6 border-t border-slate-800 text-center">
-            <Link to="/login" className="text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors">
+          <div className="mt-6 pt-6 border-t border-neutral-800 text-center">
+            <Link to="/login" className="text-sm font-medium text-neutral-300 hover:text-neutral-200 transition-colors">
               Return to Login
             </Link>
           </div>

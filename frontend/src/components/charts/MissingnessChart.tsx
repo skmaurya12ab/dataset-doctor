@@ -7,11 +7,11 @@ interface MissingnessChartProps {
 }
 
 const SEVERITY_COLOR_MAP: Record<string, string> = {
-  CRITICAL: '#f43f5e',
-  HIGH: '#f97316',
-  MEDIUM: '#eab308',
-  LOW: '#38bdf8',
-  INFO: '#94a3b8',
+  CRITICAL: '#f87171',
+  HIGH: '#d4d4d4',
+  MEDIUM: '#a3a3a3',
+  LOW: '#737373',
+  INFO: '#525252',
 }
 
 export const MissingnessChart: React.FC<MissingnessChartProps> = ({ items }) => {
@@ -33,7 +33,7 @@ export const MissingnessChart: React.FC<MissingnessChartProps> = ({ items }) => 
   const yCols = sorted.map((item) => item.column)
   const xVals = sorted.map((item) => item.missing_percentage)
   const colors = sorted.map(
-    (item) => SEVERITY_COLOR_MAP[item.severity] || '#38bdf8',
+    (item) => SEVERITY_COLOR_MAP[item.severity] || '#737373',
   )
   const hoverText = sorted.map(
     (item) =>
@@ -64,7 +64,7 @@ export const MissingnessChart: React.FC<MissingnessChartProps> = ({ items }) => 
         layout={{
           margin: { l: 120, r: 40, t: 10, b: 35 },
           xaxis: {
-            title: { text: 'Missing Percentage (%)', font: { size: 11, color: '#949ca9' } },
+            title: { text: 'Missing Percentage (%)', font: { size: 11, color: '#a3a3a3' } },
             range: [0, Math.max(100, Math.max(...xVals) * 1.15)],
             ticksuffix: '%',
           },

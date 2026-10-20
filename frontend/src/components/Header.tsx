@@ -141,9 +141,9 @@ export const Header: React.FC<HeaderProps> = ({ onOpenUpload }) => {
                     fontSize: '10px',
                     padding: '2px 6px',
                     borderRadius: '4px',
-                    background: '#f59e0b20',
-                    color: '#f59e0b',
-                    border: '1px solid #f59e0b40',
+                    background: 'var(--bg-elevated)',
+                    color: 'var(--text-secondary)',
+                    border: '1px solid var(--border-default)',
                     textDecoration: 'none',
                     fontWeight: 600,
                   }}
@@ -168,7 +168,7 @@ export const Header: React.FC<HeaderProps> = ({ onOpenUpload }) => {
                 borderRadius: '4px',
                 transition: 'color 0.15s ease',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.color = '#f43f5e')}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--severity-critical)')}
               onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
             >
               <LogOut size={16} />

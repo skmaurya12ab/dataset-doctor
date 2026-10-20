@@ -47,42 +47,42 @@ export const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 text-slate-100">
+    <div className="min-h-screen bg-neutral-950 flex flex-col justify-center items-center px-4 sm:px-6 lg:px-8 text-neutral-100">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center mb-8">
-        <div className="inline-flex items-center justify-center p-3 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 mb-4 shadow-lg shadow-indigo-500/5">
-          <Activity className="h-10 w-10 text-indigo-400" />
+        <div className="inline-flex items-center justify-center p-3 bg-white/5 rounded-2xl border border-white/10 mb-4 shadow-lg shadow-black/20">
+          <Activity className="h-10 w-10 text-neutral-300" />
         </div>
-        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+        <h1 className="text-3xl font-extrabold tracking-tight bg-gradient-to-r from-white via-neutral-200 to-neutral-400 bg-clip-text text-transparent">
           Dataset Doctor
         </h1>
-        <p className="mt-2 text-sm text-slate-400">
+        <p className="mt-2 text-sm text-neutral-400">
           Create your private workspace for ML-readiness auditing and remediation.
         </p>
       </div>
 
       <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-slate-900/90 border border-slate-800 shadow-2xl rounded-2xl p-8 backdrop-blur-xl">
+        <div className="bg-neutral-900/90 border border-neutral-800 shadow-2xl rounded-2xl p-8 backdrop-blur-xl">
           {isSuccess ? (
             <div className="text-center py-4 space-y-4">
-              <div className="mx-auto w-12 h-12 bg-emerald-500/10 text-emerald-400 rounded-full flex items-center justify-center border border-emerald-500/20">
+              <div className="mx-auto w-12 h-12 bg-green-300/10 text-green-300 rounded-full flex items-center justify-center border border-green-300/20">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
               <h2 className="text-xl font-bold text-white">Account Created!</h2>
-              <p className="text-sm text-slate-300 leading-relaxed">
-                We've registered your account for <strong className="text-indigo-300">{email}</strong>.
+              <p className="text-sm text-neutral-300 leading-relaxed">
+                We've registered your account for <strong className="text-neutral-200">{email}</strong>.
                 If email verification is required by your deployment, please check your inbox for confirmation instructions.
               </p>
               <div className="pt-4">
                 <Link
                   to="/verify-email"
                   state={{ email }}
-                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 mb-2 bg-slate-800 hover:bg-slate-700 text-slate-100 font-medium rounded-xl transition-all text-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 mb-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 font-medium rounded-xl transition-all text-sm"
                 >
                   <span>Resend Verification Email</span>
                 </Link>
                 <Link
                   to="/login"
-                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl transition-all text-sm"
+                  className="w-full inline-flex items-center justify-center gap-2 py-3 px-4 bg-white hover:bg-neutral-200 text-neutral-950 font-medium rounded-xl transition-all text-sm"
                 >
                   <span>Proceed to Login</span>
                   <ArrowRight className="h-4 w-4" />
@@ -94,9 +94,9 @@ export const RegisterPage: React.FC = () => {
               {error && (
                 <div
                   role="alert"
-                  className="mb-6 p-4 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-start gap-3 text-rose-300 text-sm"
+                  className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 text-red-300 text-sm"
                 >
-                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-rose-400" />
+                  <AlertCircle className="h-5 w-5 shrink-0 mt-0.5 text-red-400" />
                   <span>{error}</span>
                 </div>
               )}
@@ -104,7 +104,7 @@ export const RegisterPage: React.FC = () => {
                 <Link
                   to="/verify-email"
                   state={{ email }}
-                  className="mb-6 inline-flex text-sm font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                  className="mb-6 inline-flex text-sm font-medium text-neutral-300 hover:text-neutral-200 transition-colors"
                 >
                   Request a verification email later
                 </Link>
@@ -112,11 +112,11 @@ export const RegisterPage: React.FC = () => {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label htmlFor="reg-email" className="block text-sm font-medium text-slate-300 mb-1.5">
+                  <label htmlFor="reg-email" className="block text-sm font-medium text-neutral-300 mb-1.5">
                     Email Address
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-500">
                       <Mail className="h-4 w-4" />
                     </div>
                     <input
@@ -127,17 +127,17 @@ export const RegisterPage: React.FC = () => {
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       placeholder="you@company.com"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                      className="w-full pl-10 pr-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="reg-password" className="block text-sm font-medium text-slate-300 mb-1.5">
+                  <label htmlFor="reg-password" className="block text-sm font-medium text-neutral-300 mb-1.5">
                     Password (min 8 characters)
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-500">
                       <Lock className="h-4 w-4" />
                     </div>
                     <input
@@ -148,17 +148,17 @@ export const RegisterPage: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                      className="w-full pl-10 pr-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label htmlFor="reg-confirm" className="block text-sm font-medium text-slate-300 mb-1.5">
+                  <label htmlFor="reg-confirm" className="block text-sm font-medium text-neutral-300 mb-1.5">
                     Confirm Password
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-neutral-500">
                       <ShieldCheck className="h-4 w-4" />
                     </div>
                     <input
@@ -169,7 +169,7 @@ export const RegisterPage: React.FC = () => {
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       placeholder="••••••••"
-                      className="w-full pl-10 pr-4 py-2.5 bg-slate-950/80 border border-slate-700/80 rounded-xl text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all text-sm"
+                      className="w-full pl-10 pr-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
                     />
                   </div>
                 </div>
@@ -177,7 +177,7 @@ export const RegisterPage: React.FC = () => {
                 <button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full mt-2 py-3 px-4 bg-indigo-600 hover:bg-indigo-500 text-white font-medium rounded-xl shadow-lg shadow-indigo-600/20 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 focus:ring-offset-slate-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
+                  className="w-full mt-2 py-3 px-4 bg-white hover:bg-neutral-200 text-neutral-950 font-medium rounded-xl shadow-lg shadow-black/20 focus:outline-none focus:ring-2 focus:ring-white/70 focus:ring-offset-2 focus:ring-offset-neutral-900 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 text-sm"
                 >
                   {isLoading ? (
                     <>
@@ -193,12 +193,12 @@ export const RegisterPage: React.FC = () => {
                 </button>
               </form>
 
-              <div className="mt-6 pt-6 border-t border-slate-800 text-center">
-                <p className="text-sm text-slate-400">
+              <div className="mt-6 pt-6 border-t border-neutral-800 text-center">
+                <p className="text-sm text-neutral-400">
                   Already have an account?{' '}
                   <Link
                     to="/login"
-                    className="font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
+                    className="font-medium text-neutral-300 hover:text-neutral-200 transition-colors"
                   >
                     Sign in here
                   </Link>

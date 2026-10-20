@@ -36,7 +36,7 @@ export const ClassDistributionChart: React.FC<ClassDistributionChartProps> = ({
       hoverinfo: 'text' as const,
       hovertext: hoverText,
       marker: {
-        color: '#3b82f6',
+        color: '#a3a3a3',
       },
     },
   ]
@@ -64,10 +64,10 @@ export const ClassDistributionChart: React.FC<ClassDistributionChartProps> = ({
           layout={{
             margin: { l: 50, r: 20, t: 10, b: 40 },
             xaxis: {
-              title: { text: 'Class Labels', font: { size: 11, color: '#949ca9' } },
+              title: { text: 'Class Labels', font: { size: 11, color: '#a3a3a3' } },
             },
             yaxis: {
-              title: { text: 'Sample Count', font: { size: 11, color: '#949ca9' } },
+              title: { text: 'Sample Count', font: { size: 11, color: '#a3a3a3' } },
             },
           }}
         />

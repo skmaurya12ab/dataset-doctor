@@ -138,8 +138,8 @@ export const ApprovalModal: React.FC<ApprovalModalProps> = ({
 
           <div
             style={{
-              backgroundColor: 'rgba(234, 179, 8, 0.08)',
-              border: '1px solid rgba(234, 179, 8, 0.25)',
+              backgroundColor: 'rgba(255, 255, 255, 0.05)',
+              border: '1px solid rgba(255, 255, 255, 0.16)',
               padding: '12px',
               borderRadius: 'var(--radius-sm)',
               display: 'flex',
