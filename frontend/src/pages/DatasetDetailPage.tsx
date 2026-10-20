@@ -9,12 +9,81 @@ import {
   ArrowRight,
 } from 'lucide-react'
 import { api } from '../services/api'
-import type { Dataset } from '../types/dataset'
+import type { ColumnSchemaItem, Dataset, DatasetVersion } from '../types/dataset'
 import type { AnalysisRun } from '../types/analysis'
 import { MetricCard } from '../components/MetricCard'
 import { VersionTimeline } from '../components/VersionTimeline'
 import { UploadModal } from '../components/UploadModal'
 import { LoadingSpinner } from '../components/LoadingSpinner'
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function cleanErrorText(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const message = value.trim()
+  return message && message !== '[object Object]' ? message : null
+}
+
+function getVersionColumns(version: DatasetVersion | undefined): ColumnSchemaItem[] {
+  const columns = version?.raw_schema?.columns
+  if (!Array.isArray(columns)) return []
+  return columns.filter(
+    (column): column is ColumnSchemaItem =>
+      isRecord(column) && typeof column.name === 'string' && typeof column.dtype === 'string',
+  )
+}
+
+function formatApiDetail(detail: unknown): string | null {
+  if (typeof detail === 'string') return cleanErrorText(detail)
+
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (typeof item === 'string') return cleanErrorText(item) ?? ''
+        if (!isRecord(item)) return ''
+
+        const message = [item.msg, item.message, item.detail]
+          .map(cleanErrorText)
+          .find((value): value is string => value !== null)
+        if (!message) return ''
+
+        const location = Array.isArray(item.loc)
+          ? item.loc
+              .filter((part): part is string | number => typeof part === 'string' || typeof part === 'number')
+              .filter((part) => !['body', 'query', 'path', 'header'].includes(String(part)))
+              .map(String)
+          : []
+        const field = location.join(' → ').replaceAll('_', ' ')
+        return field ? `${field}: ${message.trim()}` : message.trim()
+      })
+      .filter(Boolean)
+    return messages.length > 0 ? messages.join('; ') : null
+  }
+
+  if (isRecord(detail)) {
+    return [detail.detail, detail.msg, detail.message]
+      .map(cleanErrorText)
+      .find((value): value is string => value !== null) ?? null
+  }
+
+  return null
+}
+
+function getAnalysisStartErrorMessage(error: unknown): string {
+  if (isRecord(error)) {
+    const response = isRecord(error.response) ? error.response : null
+    const data = response && isRecord(response.data) ? response.data : null
+    const detailMessage = formatApiDetail(data?.detail)
+    if (detailMessage) return detailMessage
+
+    const message = cleanErrorText(error.message)
+    if (message && !/^request failed with status code \d+$/i.test(message)) return message
+  }
+
+  return 'Could not start analysis. Check the selected target and try again.'
+}
 
 export const DatasetDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>()
@@ -28,9 +97,17 @@ export const DatasetDetailPage: React.FC = () => {
   // Modals & Triggers
   const [isUploadNewVersionOpen, setIsUploadNewVersionOpen] = useState(false)
   const [isTriggerAnalysisOpen, setIsTriggerAnalysisOpen] = useState(false)
-  const [targetColumn, setTargetColumn] = useState('')
+  const [targetColumn, setTargetColumn] = useState<string | null>(null)
   const [problemType, setProblemType] = useState('classification')
   const [isStartingAnalysis, setIsStartingAnalysis] = useState(false)
+  const [analysisStartError, setAnalysisStartError] = useState<string | null>(null)
+
+  const openAnalysisModal = () => {
+    setTargetColumn(null)
+    setProblemType('classification')
+    setAnalysisStartError(null)
+    setIsTriggerAnalysisOpen(true)
+  }
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -69,16 +146,20 @@ export const DatasetDetailPage: React.FC = () => {
 
     try {
       setIsStartingAnalysis(true)
-      const res = await api.triggerAnalysis(dataset.id, latestVer.id, {
-        target_column: targetColumn.trim() || undefined,
-        problem_type: targetColumn.trim() ? problemType : undefined,
-      })
+      const versionColumns = getVersionColumns(latestVer)
+      const selectedTarget = targetColumn !== null && versionColumns.some((column) => column.name === targetColumn)
+        ? targetColumn
+        : undefined
+      setAnalysisStartError(null)
+      const analysisRequest = selectedTarget !== undefined
+        ? { target_column: selectedTarget, problem_type: problemType }
+        : {}
+      const res = await api.triggerAnalysis(dataset.id, latestVer.id, analysisRequest)
       setIsTriggerAnalysisOpen(false)
       // Navigate straight to analysis page with this run id
       navigate(`/analysis?runId=${res.analysis_run_id}`)
     } catch (err: unknown) {
-      const errObj = err as { message?: string }
-      alert(`Failed to trigger analysis: ${errObj.message}`)
+      setAnalysisStartError(getAnalysisStartErrorMessage(err))
     } finally {
       setIsStartingAnalysis(false)
     }
@@ -97,6 +178,14 @@ export const DatasetDetailPage: React.FC = () => {
   }
 
   const latestVersion = dataset.versions[dataset.versions.length - 1]
+  const targetColumns = getVersionColumns(latestVersion)
+  let noTargetOptionValue = '__dataset_doctor_no_target__'
+  while (targetColumns.some((column) => column.name === noTargetOptionValue)) {
+    noTargetOptionValue += '_'
+  }
+  const selectedTargetColumn = targetColumn !== null && targetColumns.some((column) => column.name === targetColumn)
+    ? targetColumn
+    : null
   const hasMultipleVersions = dataset.versions.length >= 2
 
   return (
@@ -146,7 +235,7 @@ export const DatasetDetailPage: React.FC = () => {
 
             <button
               className="btn btn-primary btn-sm"
-              onClick={() => setIsTriggerAnalysisOpen(true)}
+              onClick={openAnalysisModal}
             >
               <Play size={14} />
               <span>Run Analysis</span>
@@ -300,7 +389,7 @@ export const DatasetDetailPage: React.FC = () => {
               <div style={{ marginTop: '12px' }}>
                 <button
                   className="btn btn-primary btn-sm"
-                  onClick={() => setIsTriggerAnalysisOpen(true)}
+                  onClick={openAnalysisModal}
                 >
                   <Play size={13} />
                   <span>Execute Analysis</span>
@@ -358,33 +447,63 @@ export const DatasetDetailPage: React.FC = () => {
                 <strong>v{latestVersion?.version_number}</strong>.
               </p>
 
+              {analysisStartError && (
+                <div
+                  role="alert"
+                  style={{
+                    border: '1px solid var(--severity-critical-border)',
+                    borderRadius: '6px',
+                    color: 'var(--severity-critical)',
+                    fontSize: '13px',
+                    padding: '10px 12px',
+                  }}
+                >
+                  {analysisStartError}
+                </div>
+              )}
+
               <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
-                  Target Column (Optional)
+                <label htmlFor="analysis-target-column" style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                  Target Column
                 </label>
-                <input
-                  type="text"
-                  className="input-text"
+                <select
+                  id="analysis-target-column"
+                  className="select-input"
                   style={{ width: '100%' }}
-                  placeholder="e.g. churn, label, price"
-                  value={targetColumn}
-                  onChange={(e) => setTargetColumn(e.target.value)}
-                />
+                  value={selectedTargetColumn ?? noTargetOptionValue}
+                  onChange={(e) => {
+                    setTargetColumn(e.target.value === noTargetOptionValue ? null : e.target.value)
+                    setAnalysisStartError(null)
+                  }}
+                >
+                  <option value={noTargetOptionValue}>No target (unsupervised analysis)</option>
+                  {targetColumns.map((column) => (
+                    <option key={column.name} value={column.name}>
+                      {column.name} · {column.dtype}
+                    </option>
+                  ))}
+                </select>
                 <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Specifying a target enables class imbalance and target data leakage analyzers.
+                  {targetColumns.length > 0
+                    ? 'Choose a column from this version. A target enables supervised checks; select classification for labels or regression for numeric outcomes.'
+                    : 'No columns are available for this version. Analysis can still run without a target.'}
                 </span>
               </div>
 
-              {targetColumn.trim() && (
+              {selectedTargetColumn !== null && (
                 <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
+                  <label htmlFor="analysis-problem-type" style={{ display: 'block', fontSize: '12px', fontWeight: 600, marginBottom: '6px' }}>
                     Problem Type
                   </label>
                   <select
+                    id="analysis-problem-type"
                     className="select-input"
                     style={{ width: '100%' }}
                     value={problemType}
-                    onChange={(e) => setProblemType(e.target.value)}
+                    onChange={(e) => {
+                      setProblemType(e.target.value)
+                      setAnalysisStartError(null)
+                    }}
                   >
                     <option value="classification">Classification</option>
                     <option value="regression">Regression</option>
