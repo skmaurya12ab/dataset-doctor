@@ -190,6 +190,110 @@ async def test_email_verification_flow(
 
 
 @pytest.mark.asyncio
+async def test_expired_verification_token_returns_validation_error(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+) -> None:
+    """Expired persisted tokens remain rejected through the public verification API."""
+    from datetime import datetime, timedelta, timezone
+    from app.core.security import hash_token
+
+    user = User(
+        email="expired-api-verification@example.com",
+        hashed_password="unused-test-hash",
+        is_active=True,
+        is_verified=False,
+        role="user",
+    )
+    test_db_session.add(user)
+    await test_db_session.flush()
+    token = "expired-api-test-token"
+    test_db_session.add(
+        EmailVerificationToken(
+            user_id=user.id,
+            token_hash=hash_token(token),
+            expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+        )
+    )
+    await test_db_session.commit()
+
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/verify-email", json={"token": token}
+    )
+
+    assert response.status_code == 422
+    assert "invalid or has expired" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_resend_api_issues_a_fresh_token_that_verifies(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The existing resend endpoint sends the token that is persisted and accepted by verify."""
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select
+    from app.core.security import hash_token
+    from app.models.user import EmailVerificationToken
+    from app.services import auth_service as auth_service_module
+
+    class CapturingEmailService:
+        token: str | None = None
+
+        async def send_verification_email(self, _recipient: str, token: str) -> bool:
+            self.token = token
+            return True
+
+        async def send_password_reset_email(self, *_args) -> bool:
+            return True
+
+    provider = CapturingEmailService()
+    settings = Settings(
+        environment="testing",
+        require_email_verification=True,
+        email_verification_token_expire_hours=6,
+    )
+    monkeypatch.setattr(auth_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: provider)
+    user = User(
+        email="resend-api@example.com",
+        hashed_password="unused-test-hash",
+        is_active=True,
+        is_verified=False,
+        role="user",
+    )
+    test_db_session.add(user)
+    await test_db_session.commit()
+
+    before_request = datetime.now(timezone.utc)
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/resend-verification", json={"email": user.email}
+    )
+    after_request = datetime.now(timezone.utc)
+    assert response.status_code == 200
+    assert "If an account" in response.json()["message"]
+
+    record = await test_db_session.scalar(
+        select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
+    )
+    assert provider.token is not None
+    assert record is not None
+    assert record.token_hash == hash_token(provider.token)
+    expires_at = record.expires_at
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    assert before_request + timedelta(hours=6) <= expires_at
+    assert expires_at <= after_request + timedelta(hours=6)
+    assert record.is_valid
+
+    verify_response = await unauthenticated_async_client.post(
+        "/api/v1/auth/verify-email", json={"token": provider.token}
+    )
+    assert verify_response.status_code == 200
+
+
+@pytest.mark.asyncio
 async def test_forgot_and_reset_password_flow(
     unauthenticated_async_client: AsyncClient,
     test_db_session: AsyncSession,

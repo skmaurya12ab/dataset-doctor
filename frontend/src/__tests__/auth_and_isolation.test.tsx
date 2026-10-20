@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { StrictMode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
@@ -170,6 +170,88 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
       expect(api.verifyEmail).toHaveBeenCalledWith({ token: 'valid-tok-123' })
       expect(screen.getByText('Email Verified!')).toBeInTheDocument()
     })
+  })
+
+  it('submits a single-use verification token only once when StrictMode replays effects', async () => {
+    vi.mocked(api.verifyEmail)
+      .mockResolvedValueOnce({
+        message: 'Your email address has been verified successfully!',
+        success: true,
+      })
+      .mockRejectedValueOnce({
+        response: { data: { detail: 'Verification token is invalid or has expired.' } },
+      })
+
+    render(
+      <StrictMode>
+        <MemoryRouter initialEntries={['/verify-email?token=single-use-token']}>
+          <VerifyEmailPage />
+        </MemoryRouter>
+      </StrictMode>,
+    )
+
+    await waitFor(() => {
+      expect(api.verifyEmail).toHaveBeenCalledTimes(1)
+      expect(screen.getByText('Email Verified!')).toBeInTheDocument()
+    })
+  })
+
+  it('shows resend recovery after an expired link and submits the account email', async () => {
+    vi.mocked(api.verifyEmail).mockRejectedValue({
+      response: { data: { detail: 'Verification token is invalid or has expired.' } },
+    })
+    vi.mocked(api.resendVerification).mockResolvedValue({
+      message: 'If an account needs verification, the request has been received.',
+      success: true,
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/verify-email?token=expired-token']}>
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/invalid or has expired/i)
+    expect(screen.getByText(/This link may have expired or already been used/i)).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /Resend verification email/i })).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Account Email'), {
+      target: { value: 'recover@example.com' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Resend Verification Email/i }))
+
+    await waitFor(() => {
+      expect(api.resendVerification).toHaveBeenCalledWith('recover@example.com')
+      expect(screen.getByRole('status')).toHaveTextContent(/request has been received/i)
+    })
+  })
+
+  it('prevents duplicate resend requests while the first request is pending', async () => {
+    let resolveResend: (value: { message: string; success: boolean }) => void = () => {}
+    vi.mocked(api.resendVerification).mockReturnValue(
+      new Promise((resolve) => {
+        resolveResend = resolve
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/verify-email']}>
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.change(screen.getByLabelText('Account Email'), {
+      target: { value: 'recover@example.com' },
+    })
+    const resendButton = screen.getByRole('button', { name: /Resend Verification Email/i })
+    fireEvent.click(resendButton)
+    fireEvent.click(resendButton)
+
+    expect(api.resendVerification).toHaveBeenCalledTimes(1)
+    expect(resendButton).toBeDisabled()
+
+    resolveResend({ message: 'Request received.', success: true })
+    expect(await screen.findByRole('status')).toHaveTextContent('Request received.')
   })
 
   it('prefills the account email and requests a verification resend', async () => {

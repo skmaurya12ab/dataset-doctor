@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { Link, useLocation, useSearchParams } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowRight, CheckCircle2, KeyRound } from 'lucide-react'
 import { api } from '../services/api'
@@ -15,6 +15,8 @@ export const VerifyEmailPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [isResending, setIsResending] = useState(false)
+  const autoVerifiedToken = useRef<string | null>(null)
+  const resendRequestInFlight = useRef(false)
 
   const verify = async (tokenToUse: string) => {
     if (!tokenToUse) return
@@ -36,9 +38,11 @@ export const VerifyEmailPage: React.FC = () => {
   }
 
   useEffect(() => {
-    if (initialToken) {
-      verify(initialToken)
-    }
+    if (!initialToken || autoVerifiedToken.current === initialToken) return
+    // The API consumes a single-use token. React StrictMode replays effects in
+    // development, so submit each URL token at most once per mounted page.
+    autoVerifiedToken.current = initialToken
+    void verify(initialToken)
   }, [initialToken])
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -48,6 +52,8 @@ export const VerifyEmailPage: React.FC = () => {
 
   const handleResend = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (resendRequestInFlight.current) return
+    resendRequestInFlight.current = true
     setIsResending(true)
     setResendMessage(null)
     try {
@@ -59,6 +65,7 @@ export const VerifyEmailPage: React.FC = () => {
         errObj.response?.data?.detail || errObj.message || 'The request could not be processed. Try again later.',
       )
     } finally {
+      resendRequestInFlight.current = false
       setIsResending(false)
     }
   }
@@ -113,9 +120,43 @@ export const VerifyEmailPage: React.FC = () => {
                 <span>{message}</span>
               </div>
               <p className="text-xs text-neutral-400 text-center">
-                Enter a token manually below or request a new verification email.
+                This link may have expired or already been used. Request a fresh verification email below.
               </p>
             </div>
+          )}
+
+          {(status === 'idle' || status === 'error') && (
+            <form onSubmit={handleResend} className="mt-5 border-t border-neutral-800 pt-5 space-y-3">
+              <h2 className="text-sm font-semibold text-neutral-200">Resend verification email</h2>
+              <p className="text-xs text-neutral-400">
+                Enter the email address used to register and we’ll send a new link if verification is still needed.
+              </p>
+              <div>
+                <label htmlFor="resend-email" className="block text-sm font-medium text-neutral-300 mb-1.5">
+                  Account Email
+                </label>
+                <input
+                  id="resend-email"
+                  type="email"
+                  required
+                  autoComplete="email"
+                  value={resendEmail}
+                  onChange={(e) => setResendEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  className="w-full px-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={isResending}
+                className="w-full py-2.5 px-4 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 font-medium rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isResending ? 'Requesting…' : 'Resend Verification Email'}
+              </button>
+              {resendMessage && (
+                <p role="status" className="text-xs text-neutral-300 text-center">{resendMessage}</p>
+              )}
+            </form>
           )}
 
           {(status === 'idle' || status === 'error') && (
@@ -147,37 +188,6 @@ export const VerifyEmailPage: React.FC = () => {
                 <span>Verify Token</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
-            </form>
-          )}
-
-          {status !== 'success' && (
-            <form onSubmit={handleResend} className="mt-6 border-t border-neutral-800 pt-5 space-y-3">
-              <h2 className="text-sm font-semibold text-neutral-200">Need a new verification email?</h2>
-              <div>
-                <label htmlFor="resend-email" className="block text-sm font-medium text-neutral-300 mb-1.5">
-                  Account Email
-                </label>
-                <input
-                  id="resend-email"
-                  type="email"
-                  required
-                  autoComplete="email"
-                  value={resendEmail}
-                  onChange={(e) => setResendEmail(e.target.value)}
-                  placeholder="you@example.com"
-                  className="w-full px-4 py-2.5 bg-neutral-950/80 border border-neutral-700/80 rounded-xl text-neutral-100 placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-white/30 focus:border-neutral-300 transition-all text-sm"
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={isResending}
-                className="w-full py-2.5 px-4 bg-neutral-800 hover:bg-neutral-700 text-neutral-100 font-medium rounded-xl transition-all text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isResending ? 'Requesting…' : 'Resend Verification Email'}
-              </button>
-              {resendMessage && (
-                <p role="status" className="text-xs text-neutral-300 text-center">{resendMessage}</p>
-              )}
             </form>
           )}
 
