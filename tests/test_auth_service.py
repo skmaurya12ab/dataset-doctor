@@ -125,7 +125,7 @@ async def test_auth_service_expired_session(test_db_session: AsyncSession) -> No
 
 
 @pytest.mark.asyncio
-async def test_auth_service_email_verification(test_db_session: AsyncSession) -> None:
+async def test_auth_service_email_verification(test_db_session: AsyncSession, caplog) -> None:
     """Verify token-based email confirmation and rejection of reuse."""
     from sqlalchemy import select
     from app.models.user import EmailVerificationToken
@@ -153,8 +153,11 @@ async def test_auth_service_email_verification(test_db_session: AsyncSession) ->
     assert user.is_verified is True
 
     # Reusing the token fails
+    caplog.set_level("INFO", logger="app.services.auth_service")
     with pytest.raises(ValidationException, match="invalid or has expired"):
         await svc.verify_email(test_db_session, raw_token)
+    assert "category=consumed" in caplog.text
+    assert raw_token not in caplog.text
 
 
 @pytest.mark.asyncio

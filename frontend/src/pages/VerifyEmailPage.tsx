@@ -1,10 +1,11 @@
-import React, { useEffect, useRef, useState } from 'react'
-import { Link, useLocation, useSearchParams } from 'react-router-dom'
+import React, { useRef, useState } from 'react'
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowRight, CheckCircle2, KeyRound } from 'lucide-react'
 import { api } from '../services/api'
 
 export const VerifyEmailPage: React.FC = () => {
   const location = useLocation()
+  const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialToken = searchParams.get('token') || ''
   const navigationState = location.state as { email?: unknown } | null
@@ -15,18 +16,37 @@ export const VerifyEmailPage: React.FC = () => {
   const [message, setMessage] = useState<string | null>(null)
   const [resendMessage, setResendMessage] = useState<string | null>(null)
   const [isResending, setIsResending] = useState(false)
-  const autoVerifiedToken = useRef<string | null>(null)
+  const verificationRequestInFlight = useRef(false)
+  const verificationRequestId = useRef(0)
   const resendRequestInFlight = useRef(false)
 
   const verify = async (tokenToUse: string) => {
-    if (!tokenToUse) return
+    if (!tokenToUse || verificationRequestInFlight.current) return
+    verificationRequestInFlight.current = true
+    const requestId = ++verificationRequestId.current
     setStatus('loading')
     setMessage(null)
     try {
       const res = await api.verifyEmail({ token: tokenToUse })
+      if (requestId !== verificationRequestId.current) return
       setStatus('success')
       setMessage(res.message || 'Your email address has been verified successfully!')
+
+      if (searchParams.has('token')) {
+        const remainingParams = new URLSearchParams(searchParams)
+        remainingParams.delete('token')
+        const query = remainingParams.toString()
+        navigate(
+          {
+            pathname: location.pathname,
+            search: query ? `?${query}` : '',
+            hash: location.hash,
+          },
+          { replace: true, state: location.state },
+        )
+      }
     } catch (err: unknown) {
+      if (requestId !== verificationRequestId.current) return
       setStatus('error')
       const errObj = err as { response?: { data?: { detail?: string } }; message?: string }
       setMessage(
@@ -34,16 +54,12 @@ export const VerifyEmailPage: React.FC = () => {
           errObj.message ||
           'Verification token is invalid, expired, or already used.',
       )
+    } finally {
+      if (requestId === verificationRequestId.current) {
+        verificationRequestInFlight.current = false
+      }
     }
   }
-
-  useEffect(() => {
-    if (!initialToken || autoVerifiedToken.current === initialToken) return
-    // The API consumes a single-use token. React StrictMode replays effects in
-    // development, so submit each URL token at most once per mounted page.
-    autoVerifiedToken.current = initialToken
-    void verify(initialToken)
-  }, [initialToken])
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -125,6 +141,12 @@ export const VerifyEmailPage: React.FC = () => {
             </div>
           )}
 
+          {initialToken && status === 'idle' && (
+            <p className="text-sm text-neutral-300 text-center">
+              Your verification link is ready. Select <strong>Verify Email</strong> to confirm this address.
+            </p>
+          )}
+
           {(status === 'idle' || status === 'error') && (
             <form onSubmit={handleResend} className="mt-5 border-t border-neutral-800 pt-5 space-y-3">
               <h2 className="text-sm font-semibold text-neutral-200">Resend verification email</h2>
@@ -185,7 +207,7 @@ export const VerifyEmailPage: React.FC = () => {
                 type="submit"
                 className="w-full py-3 px-4 bg-white hover:bg-neutral-200 text-neutral-950 font-medium rounded-xl transition-all text-sm flex items-center justify-center gap-2"
               >
-                <span>Verify Token</span>
+                <span>{initialToken ? 'Verify Email' : 'Verify Token'}</span>
                 <ArrowRight className="h-4 w-4" />
               </button>
             </form>

@@ -1,7 +1,7 @@
 import React, { StrictMode } from 'react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { LoginPage } from '../pages/LoginPage'
 import { RegisterPage } from '../pages/RegisterPage'
 import { VerifyEmailPage } from '../pages/VerifyEmailPage'
@@ -13,6 +13,11 @@ import { AuthProvider } from '../context/AuthContext'
 import { api } from '../services/api'
 
 vi.mock('../services/api')
+
+const LocationProbe: React.FC = () => {
+  const location = useLocation()
+  return <output data-testid="current-location">{`${location.pathname}${location.search}`}</output>
+}
 
 describe('Frontend Authentication - Pages & Route Guards', () => {
   beforeEach(() => {
@@ -154,7 +159,7 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
     })
   })
 
-  it('verifies token on VerifyEmailPage from URL search params', async () => {
+  it('requires confirmation for a URL token and removes it from history after success', async () => {
     vi.mocked(api.verifyEmail).mockResolvedValue({
       message: 'Your email address has been verified successfully!',
       success: true,
@@ -162,38 +167,110 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
 
     render(
       <MemoryRouter initialEntries={['/verify-email?token=valid-tok-123']}>
+        <LocationProbe />
         <VerifyEmailPage />
       </MemoryRouter>,
     )
 
+    expect(screen.getByText(/Your verification link is ready/i)).toBeInTheDocument()
+    expect(api.verifyEmail).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }))
+
     await waitFor(() => {
       expect(api.verifyEmail).toHaveBeenCalledWith({ token: 'valid-tok-123' })
+      expect(api.verifyEmail).toHaveBeenCalledTimes(1)
       expect(screen.getByText('Email Verified!')).toBeInTheDocument()
+      expect(screen.getByTestId('current-location')).toHaveTextContent('/verify-email')
+      expect(screen.getByTestId('current-location')).not.toHaveTextContent('token=')
     })
   })
 
-  it('submits a single-use verification token only once when StrictMode replays effects', async () => {
-    vi.mocked(api.verifyEmail)
-      .mockResolvedValueOnce({
-        message: 'Your email address has been verified successfully!',
-        success: true,
-      })
-      .mockRejectedValueOnce({
-        response: { data: { detail: 'Verification token is invalid or has expired.' } },
-      })
+  it('does not consume a verification token merely by opening its page under StrictMode', async () => {
+    vi.mocked(api.verifyEmail).mockResolvedValue({
+      message: 'Your email address has been verified successfully!',
+      success: true,
+    })
 
     render(
       <StrictMode>
         <MemoryRouter initialEntries={['/verify-email?token=single-use-token']}>
+          <LocationProbe />
           <VerifyEmailPage />
         </MemoryRouter>
       </StrictMode>,
     )
 
-    await waitFor(() => {
-      expect(api.verifyEmail).toHaveBeenCalledTimes(1)
-      expect(screen.getByText('Email Verified!')).toBeInTheDocument()
+    expect(await screen.findByText(/Your verification link is ready/i)).toBeInTheDocument()
+    expect(api.verifyEmail).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }))
+    expect(await screen.findByText('Email Verified!')).toBeInTheDocument()
+    expect(api.verifyEmail).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps manual token entry available when no URL token is provided', async () => {
+    vi.mocked(api.verifyEmail).mockResolvedValue({
+      message: 'Manual token verified.',
+      success: true,
     })
+
+    render(
+      <MemoryRouter initialEntries={['/verify-email']}>
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('button', { name: 'Verify Token' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Verification Token'), {
+      target: { value: 'manual-verification-token' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Token' }))
+
+    expect(await screen.findByText('Email Verified!')).toBeInTheDocument()
+    expect(api.verifyEmail).toHaveBeenCalledTimes(1)
+    expect(api.verifyEmail).toHaveBeenCalledWith({ token: 'manual-verification-token' })
+  })
+
+  it('prevents duplicate verification submissions while a request is pending', async () => {
+    let resolveVerification: (value: { message: string; success: boolean }) => void = () => {}
+    vi.mocked(api.verifyEmail).mockReturnValue(
+      new Promise((resolve) => {
+        resolveVerification = resolve
+      }),
+    )
+
+    render(
+      <MemoryRouter initialEntries={['/verify-email?token=pending-token']}>
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    const verifyButton = screen.getByRole('button', { name: 'Verify Email' })
+    fireEvent.click(verifyButton)
+    fireEvent.click(verifyButton)
+    expect(api.verifyEmail).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText(/Verifying your token/i)).toBeInTheDocument()
+
+    resolveVerification({ message: 'Verified.', success: true })
+    expect(await screen.findByText('Email Verified!')).toBeInTheDocument()
+  })
+
+  it('keeps success visible after a failed verification is retried successfully', async () => {
+    vi.mocked(api.verifyEmail)
+      .mockRejectedValueOnce({ response: { data: { detail: 'Temporary verification error.' } } })
+      .mockResolvedValueOnce({ message: 'Verified on retry.', success: true })
+
+    render(
+      <MemoryRouter initialEntries={['/verify-email?token=retry-token']}>
+        <VerifyEmailPage />
+      </MemoryRouter>,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('Temporary verification error.')
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }))
+    expect(await screen.findByText('Email Verified!')).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(api.verifyEmail).toHaveBeenCalledTimes(2)
   })
 
   it('shows resend recovery after an expired link and submits the account email', async () => {
@@ -211,6 +288,8 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
       </MemoryRouter>,
     )
 
+    expect(api.verifyEmail).not.toHaveBeenCalled()
+    fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/invalid or has expired/i)
     expect(screen.getByText(/This link may have expired or already been used/i)).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: /Resend verification email/i })).toBeInTheDocument()

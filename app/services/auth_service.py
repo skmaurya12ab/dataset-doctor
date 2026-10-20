@@ -63,17 +63,24 @@ class AuthService:
         await db.commit()
 
         # 4. Dispatch verification email
-        if await self._reserve_email(db, user.id, "verification"):
+        email_reserved = await self._reserve_email(db, user.id, "verification")
+        if email_reserved:
             delivered = await get_email_service().send_verification_email(clean_email, raw_verify_token)
         else:
             delivered = False
         if not delivered:
-            # The account remains persisted so the user can use resend after cooldown.
+            if settings.require_email_verification:
+                if email_reserved:
+                    # Delivery may have succeeded before its acknowledgement was lost.
+                    # Keep the hashed token so a message that did arrive remains usable.
+                    logger.warning("Registration email delivery was not confirmed; verification token retained")
+                else:
+                    await db.delete(token_record)
+                    await db.commit()
+                    logger.warning("Registration email was not attempted; verification token removed")
+                raise EmailDeliveryException()
             await db.delete(token_record)
             await db.commit()
-            if settings.require_email_verification:
-                logger.warning("Registration email delivery did not complete")
-                raise EmailDeliveryException()
 
         logger.info("Registered new user (id: %s)", user.id)
         return user
@@ -187,17 +194,33 @@ class AuthService:
             select(EmailVerificationToken)
             .options(selectinload(EmailVerificationToken.user))
             .where(EmailVerificationToken.token_hash == token_hash)
+            .with_for_update()
         )
         token_record = (await db.execute(stmt)).scalar_one_or_none()
 
-        if not token_record or not token_record.is_valid:
+        if not token_record:
+            logger.info("Email verification token rejected category=not_found_or_invalidated")
+            raise ValidationException("Verification token is invalid or has expired.")
+        if token_record.used_at is not None:
+            logger.info("Email verification token rejected category=consumed")
+            raise ValidationException("Verification token is invalid or has expired.")
+        expires_at = token_record.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        else:
+            expires_at = expires_at.astimezone(timezone.utc)
+        if datetime.now(timezone.utc) >= expires_at:
+            logger.info("Email verification token rejected category=expired")
+            raise ValidationException("Verification token is invalid or has expired.")
+        if token_record.user is None:
+            logger.info("Email verification token rejected category=account_missing")
             raise ValidationException("Verification token is invalid or has expired.")
 
         token_record.used_at = datetime.now(timezone.utc)
         token_record.user.is_verified = True
         await db.commit()
 
-        logger.info("Email verified for user %s", token_record.user.email)
+        logger.info("Email verification completed")
         return True
 
     async def resend_verification_email(self, db: AsyncSession, email: str) -> bool:
@@ -210,13 +233,24 @@ class AuthService:
         user = (await db.execute(stmt)).scalar_one_or_none()
 
         if not user or not user.is_active or user.is_verified:
-            logger.info("Resend verification requested for nonexistent, inactive, or already-verified: %s", clean_email)
+            logger.info("Resend verification request ignored for non-verifiable account")
             return True
 
         settings = get_settings()
         raw_token = generate_token(32)
         token_hash = hash_token(raw_token)
-        expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.email_verification_token_expire_hours)
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(hours=settings.email_verification_token_expire_hours)
+
+        # Prune expired unused tokens before creating another candidate, while
+        # preserving every still-valid link until a new delivery is confirmed.
+        await db.execute(
+            delete(EmailVerificationToken).where(
+                EmailVerificationToken.user_id == user.id,
+                EmailVerificationToken.used_at.is_(None),
+                EmailVerificationToken.expires_at <= now,
+            )
+        )
 
         record = EmailVerificationToken(
             id=uuid.uuid4(),
@@ -228,13 +262,17 @@ class AuthService:
         await db.commit()
 
         if not await self._reserve_email(db, user.id, "verification"):
-            delivered = False
-        else:
-            delivered = await get_email_service().send_verification_email(clean_email, raw_token)
-        if not delivered:
             await db.delete(record)
             await db.commit()
-            logger.warning("Verification email delivery did not complete")
+            logger.info("Verification email resend not sent because delivery limits were reached")
+            return False
+
+        delivered = await get_email_service().send_verification_email(clean_email, raw_token)
+        if not delivered:
+            # The provider may have accepted the message but lost the response.
+            # Keep this token alongside prior valid tokens; a later successful
+            # resend or verification consumes/invalidates the remaining links.
+            logger.warning("Verification email delivery was not confirmed; token retained")
             return False
 
         await db.execute(

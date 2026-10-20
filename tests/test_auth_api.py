@@ -193,6 +193,7 @@ async def test_email_verification_flow(
 async def test_expired_verification_token_returns_validation_error(
     unauthenticated_async_client: AsyncClient,
     test_db_session: AsyncSession,
+    caplog,
 ) -> None:
     """Expired persisted tokens remain rejected through the public verification API."""
     from datetime import datetime, timedelta, timezone
@@ -217,12 +218,32 @@ async def test_expired_verification_token_returns_validation_error(
     )
     await test_db_session.commit()
 
+    caplog.set_level("INFO", logger="app.services.auth_service")
     response = await unauthenticated_async_client.post(
         "/api/v1/auth/verify-email", json={"token": token}
     )
 
     assert response.status_code == 422
     assert "invalid or has expired" in response.json()["detail"]
+    assert "category=expired" in caplog.text
+    assert token not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_unknown_verification_token_logs_only_safe_category(
+    unauthenticated_async_client: AsyncClient,
+    caplog,
+) -> None:
+    token = "unknown-test-verification-token"
+    caplog.set_level("INFO", logger="app.services.auth_service")
+
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/verify-email", json={"token": token}
+    )
+
+    assert response.status_code == 422
+    assert "category=not_found_or_invalidated" in caplog.text
+    assert token not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -356,10 +377,14 @@ async def test_registration_delivery_failure_does_not_report_success(
     """Persisted account can recover through resend after a failed first dispatch."""
     from sqlalchemy import select
     from app.core.config import Settings
+    from app.core.security import hash_token
     from app.services import auth_service as auth_service_module
 
     class FailedEmailService:
-        async def send_verification_email(self, *_args):
+        token: str | None = None
+
+        async def send_verification_email(self, _recipient, token):
+            self.token = token
             return False
 
         async def send_password_reset_email(self, *_args):
@@ -370,7 +395,8 @@ async def test_registration_delivery_failure_does_not_report_success(
         "get_settings",
         lambda: Settings(environment="testing", require_email_verification=True),
     )
-    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: FailedEmailService())
+    provider = FailedEmailService()
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: provider)
 
     response = await unauthenticated_async_client.post(
         "/api/v1/auth/register",
@@ -385,7 +411,19 @@ async def test_registration_delivery_failure_does_not_report_success(
             select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
         )
     ).scalars().all()
-    assert tokens == []
+    assert provider.token is not None
+    assert len(tokens) == 1
+    assert tokens[0].token_hash == hash_token(provider.token)
+    assert tokens[0].is_valid
+
+    # A non-success relay response may mean delivery was uncertain, so the
+    # email that did arrive must still carry a usable token.
+    verify_response = await unauthenticated_async_client.post(
+        "/api/v1/auth/verify-email", json={"token": provider.token}
+    )
+    assert verify_response.status_code == 200
+    await test_db_session.refresh(user)
+    assert user.is_verified is True
 
 
 @pytest.mark.asyncio
@@ -402,7 +440,10 @@ async def test_resend_failure_keeps_previous_token_and_generic_response(
     from app.services import auth_service as auth_service_module
 
     class FailedEmailService:
-        async def send_verification_email(self, *_args):
+        token: str | None = None
+
+        async def send_verification_email(self, _recipient, token):
+            self.token = token
             return False
 
         async def send_password_reset_email(self, *_args):
@@ -413,7 +454,8 @@ async def test_resend_failure_keeps_previous_token_and_generic_response(
         "get_settings",
         lambda: Settings(environment="testing", email_recipient_cooldown_seconds=60),
     )
-    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: FailedEmailService())
+    provider = FailedEmailService()
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: provider)
     user = User(
         email="resend-failed@example.com",
         hashed_password="unused-test-hash",
@@ -428,7 +470,12 @@ async def test_resend_failure_keeps_previous_token_and_generic_response(
         token_hash=hash_token("old-delivered-token"),
         expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
     )
-    test_db_session.add(old_token)
+    expired_token = EmailVerificationToken(
+        user_id=user.id,
+        token_hash=hash_token("expired-previous-token"),
+        expires_at=datetime.now(timezone.utc) - timedelta(seconds=1),
+    )
+    test_db_session.add_all([old_token, expired_token])
     await test_db_session.commit()
 
     response = await unauthenticated_async_client.post(
@@ -441,8 +488,75 @@ async def test_resend_failure_keeps_previous_token_and_generic_response(
             select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
         )
     ).scalars().all()
-    assert len(tokens) == 1
-    assert tokens[0].token_hash == hash_token("old-delivered-token")
+    assert provider.token is not None
+    assert {token.token_hash for token in tokens} == {
+        hash_token("old-delivered-token"),
+        hash_token(provider.token),
+    }
+    assert all(token.is_valid for token in tokens)
+
+
+@pytest.mark.asyncio
+async def test_resend_cooldown_removes_candidate_without_dispatch(
+    unauthenticated_async_client: AsyncClient,
+    test_db_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A cooldown rejection does not retain an unsent candidate token or call the provider."""
+    from datetime import datetime, timezone
+    from sqlalchemy import select
+    from app.core.config import Settings
+    from app.models.email_delivery import EmailDeliveryAttempt
+    from app.services import auth_service as auth_service_module
+
+    class RecordingEmailService:
+        calls = 0
+
+        async def send_verification_email(self, *_args):
+            self.calls += 1
+            return True
+
+        async def send_password_reset_email(self, *_args):
+            return True
+
+    provider = RecordingEmailService()
+    settings = Settings(
+        environment="testing",
+        email_recipient_cooldown_seconds=900,
+    )
+    monkeypatch.setattr(auth_service_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(auth_service_module, "get_email_service", lambda: provider)
+    user = User(
+        email="resend-cooldown@example.com",
+        hashed_password="unused-test-hash",
+        is_active=True,
+        is_verified=False,
+        role="user",
+    )
+    test_db_session.add(user)
+    await test_db_session.flush()
+    test_db_session.add(
+        EmailDeliveryAttempt(
+            user_id=user.id,
+            message_type="verification",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    await test_db_session.commit()
+
+    response = await unauthenticated_async_client.post(
+        "/api/v1/auth/resend-verification", json={"email": user.email}
+    )
+    tokens = (
+        await test_db_session.execute(
+            select(EmailVerificationToken).where(EmailVerificationToken.user_id == user.id)
+        )
+    ).scalars().all()
+
+    assert response.status_code == 200
+    assert "If an account" in response.json()["message"]
+    assert provider.calls == 0
+    assert tokens == []
 
 
 @pytest.mark.asyncio
