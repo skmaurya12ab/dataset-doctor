@@ -37,7 +37,7 @@ export const LoginPage: React.FC = () => {
       if (errObj.response?.status === 429) {
         const headers = errObj.response.headers
         const retryValue = headers?.get?.('retry-after') ?? headers?.['retry-after']
-        const retrySeconds = typeof retryValue === 'string' && /^\\d+$/.test(retryValue)
+        const retrySeconds = typeof retryValue === 'string' && /^\d+$/.test(retryValue)
           ? Number(retryValue)
           : null
         setError(
