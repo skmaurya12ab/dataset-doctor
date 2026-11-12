@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { Activity, AlertCircle, ArrowRight, Lock, Mail } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
@@ -12,10 +12,13 @@ export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const submissionInFlight = useRef(false)
   const [error, setError] = useState<string | null>(null)
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (submissionInFlight.current) return
+    submissionInFlight.current = true
     setError(null)
     setIsLoading(true)
 
@@ -23,13 +26,35 @@ export const LoginPage: React.FC = () => {
       await login({ email, password })
       navigate(from, { replace: true })
     } catch (err: unknown) {
-      const errObj = err as { response?: { data?: { detail?: string } }; message?: string }
-      setError(
-        errObj.response?.data?.detail ||
-          errObj.message ||
-          'Authentication failed. Please verify your credentials.',
-      )
+      const errObj = err as {
+        response?: {
+          status?: number
+          data?: { detail?: string } | string
+          headers?: { get?: (name: string) => string | null; [key: string]: unknown }
+        }
+        message?: string
+      }
+      if (errObj.response?.status === 429) {
+        const headers = errObj.response.headers
+        const retryValue = headers?.get?.('retry-after') ?? headers?.['retry-after']
+        const retrySeconds = typeof retryValue === 'string' && /^\\d+$/.test(retryValue)
+          ? Number(retryValue)
+          : null
+        setError(
+          retrySeconds !== null && Number.isSafeInteger(retrySeconds) && retrySeconds <= 3600
+            ? `Too many sign-in attempts. Please wait ${retrySeconds} seconds before trying again.`
+            : 'Sign-in is temporarily rate limited. Please wait a moment before trying again.',
+        )
+      } else {
+        const detail = errObj.response?.data
+        setError(
+          (typeof detail === 'object' && detail && typeof detail.detail === 'string' && detail.detail) ||
+            errObj.message ||
+            'Authentication failed. Please verify your credentials.',
+        )
+      }
     } finally {
+      submissionInFlight.current = false
       setIsLoading(false)
     }
   }
