@@ -16,7 +16,7 @@ from app.core.config import Settings, get_settings
 from app.core.exceptions import AuthenticationException
 from app.core.logging import get_logger
 from app.core.rate_limit import rate_limiter
-from app.core.security import generate_token
+from app.core.security import generate_token, hash_token
 from app.models.user import User
 from app.schemas.auth import (
     ForgotPasswordRequest,
@@ -80,7 +80,23 @@ async def login(
 ) -> LoginResponse:
     """Authenticate email and password, issue cryptographically random session token, and set HttpOnly cookie."""
     client_ip = get_client_ip(request)
-    rate_limiter.enforce(f"login:{client_ip}", max_requests=10, window_seconds=60, action_name="Login")
+    # A shared reverse-proxy address must not exhaust every user's small login
+    # budget. Apply a narrow per-identity-and-origin limit while retaining a
+    # broader per-origin cap to reduce password-spraying and resource abuse.
+    # Never put a raw email address in rate-limit keys.
+    identity_digest = hash_token(req.email)
+    rate_limiter.enforce(
+        f"login_identity:{client_ip}:{identity_digest}",
+        max_requests=10,
+        window_seconds=60,
+        action_name="Login",
+    )
+    rate_limiter.enforce(
+        f"login_origin:{client_ip}",
+        max_requests=120,
+        window_seconds=60,
+        action_name="Login",
+    )
 
     user = await auth_service.authenticate_user(db=db, req=req)
 
