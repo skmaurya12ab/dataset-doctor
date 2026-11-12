@@ -93,6 +93,74 @@ describe('Frontend Authentication - Pages & Route Guards', () => {
     })
   })
 
+  it('renders a useful retry message when login is rate limited by the backend', async () => {
+    vi.mocked(api.login).mockRejectedValue({
+      response: { status: 429, data: { detail: 'Login limit exceeded.' }, headers: { 'retry-after': '42' } },
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <AuthProvider>
+          <LoginPage />
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'user@example.com' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'testpassword' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign In/i }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please wait 42 seconds')
+  })
+
+  it('shows a readable error when the upstream proxy sends a non-JSON 429', async () => {
+    vi.mocked(api.login).mockRejectedValue({
+      response: { status: 429, data: '<html>Too Many Requests</html>', headers: {} },
+      message: 'Request failed with status code 429',
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <AuthProvider>
+          <LoginPage />
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'user@example.com' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'testpassword' } })
+    fireEvent.click(screen.getByRole('button', { name: /Sign In/i }))
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('Sign-in is temporarily rate limited')
+    expect(alert).not.toHaveTextContent('status code 429')
+  })
+
+  it('sends only one login request for rapid double submission', async () => {
+    let releaseLogin: (response: Awaited<ReturnType<typeof api.login>>) => void = () => {}
+    vi.mocked(api.login).mockReturnValue(new Promise((resolve) => { releaseLogin = resolve }))
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <AuthProvider>
+          <LoginPage />
+        </AuthProvider>
+      </MemoryRouter>,
+    )
+    fireEvent.change(screen.getByLabelText(/Email Address/i), { target: { value: 'user@example.com' } })
+    fireEvent.change(screen.getByLabelText(/Password/i), { target: { value: 'testpassword' } })
+    const formButton = screen.getByRole('button', { name: /Sign In/i })
+    fireEvent.click(formButton)
+    fireEvent.click(formButton)
+    expect(api.login).toHaveBeenCalledTimes(1)
+    releaseLogin({
+      user: {
+        id: 'user-1', email: 'user@example.com', is_active: true, is_verified: true,
+        role: 'user', created_at: new Date().toISOString(),
+      },
+      message: 'Authentication successful',
+      csrf_token: 'csrf123',
+    })
+    await waitFor(() => expect(screen.queryByText('Signing in...')).not.toBeInTheDocument())
+  })
+
   it('validates password matching on RegisterPage before submitting', async () => {
     render(
       <MemoryRouter initialEntries={['/register']}>

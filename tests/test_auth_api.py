@@ -626,3 +626,51 @@ async def test_rate_limiting_enforcement(unauthenticated_async_client: AsyncClie
     assert 429 in responses
     # Confirm Retry-After header
     assert any("Retry-After" in r.headers for r in [resp] if resp.status_code == 429)
+
+
+@pytest.mark.asyncio
+async def test_login_rate_limit_does_not_block_other_identity_behind_shared_ip(
+    unauthenticated_async_client: AsyncClient,
+) -> None:
+    """Attempts to one account do not exhaust the small budget for every user of a shared proxy."""
+    client = unauthenticated_async_client
+    for _ in range(10):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "target@example.com", "password": "wrong-password"},
+        )
+        assert response.status_code == 401
+
+    blocked = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "target@example.com", "password": "wrong-password"},
+    )
+    assert blocked.status_code == 429
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+    separate_user = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "separate@example.com", "password": "wrong-password"},
+    )
+    assert separate_user.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_broad_origin_cap_blocks_identity_rotation(
+    unauthenticated_async_client: AsyncClient,
+) -> None:
+    """Unique-account rotation is still subject to the broader per-origin abuse budget."""
+    client = unauthenticated_async_client
+    for index in range(120):
+        response = await client.post(
+            "/api/v1/auth/login",
+            json={"email": f"spray-{index}@example.com", "password": "wrong-password"},
+        )
+        assert response.status_code == 401
+
+    blocked = await client.post(
+        "/api/v1/auth/login",
+        json={"email": "spray-121@example.com", "password": "wrong-password"},
+    )
+    assert blocked.status_code == 429
+    assert "Retry-After" in blocked.headers
